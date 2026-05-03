@@ -4,5 +4,6 @@
     "compress": "zip:9",
     "save_history": true,
     "books_subdir": "books",
-    "metadata_subdir": "metadata"
+    "metadata_subdir": "metadata",
+    "author_ident": "guid"
 }

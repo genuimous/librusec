@@ -230,10 +230,10 @@ def main():
     settings["format"] = settings.get("format", "fb2").lower()
     settings["lang_list"] = settings.get("lang_list", "ru").lower()
     settings["compress"] = settings.get("compress", "zip:5")
-    settings["load_history"] = settings.get("load_history", False)
     settings["save_history"] = settings.get("save_history", False)
     settings["books_subdir"] = settings.get("books_subdir", "books")
     settings["metadata_subdir"] = settings.get("metadata_subdir", "metadata")
+    settings["author_ident"] = settings.get("author_ident", "guid")
 
     # допустимые языки
     lang_list = {}
@@ -380,9 +380,11 @@ def main():
 
                     # имя целевого файла
                     if compresstype == "none":
-                        book_file_name = file_name
-                    else:
+                        book_file_name = os.path.basename(file_name)
+                    elif compresstype == "zip" or compresstype == "7z":
                         book_file_name = os.path.splitext(os.path.basename(file_name))[0] + compressext.get(compresstype, "")
+                    else:
+                        book_file_name = os.path.splitext(os.path.basename(file_name))[0] + file_ext + compressext.get(compresstype, "")
 
                     if not skip_existing or book_file_name not in existing_books:
                         # попытка определить данные о книге
@@ -395,12 +397,20 @@ def main():
                         if author:
                             # если новый автор, добавить в базу
                             if author.lower() not in authors:
-                                guid = uuid.uuid4().hex
-                                authors[author.lower()] = guid
+                                author_ident = settings["author_ident"]
+                                if author_ident == "guid":
+                                    uid = uuid.uuid4().hex
+                                elif author_ident == "hash":
+                                    uid = hashlib.md5(author.lower().encode('utf-8')).hexdigest()
+                                else:
+                                    logging.error(f"Неизвестный тип UID: \"{author_ident}\"")
+                                    return
+                                
+                                authors[author.lower()] = uid
                                 with open(authors_path, 'a', encoding='utf-8') as authors_file:
                                     authors_file.write(
                                         json.dumps(
-                                            {author: guid}, 
+                                            {author: uid}, 
                                             ensure_ascii=False
                                         ) 
                                         + 
@@ -408,13 +418,13 @@ def main():
                                     )
                                 authors_changed = True
                             else:
-                                guid = authors[author.lower()]
+                                uid = authors[author.lower()]
                         else:
-                            guid = "0"
+                            uid = "0"
                             author = "Неизвестен"
                         
-                        if (lang in lang_list or not lang or not lang_list) and (guid != "0" or store_unknown):
-                            author_dir = os.path.join(work_dir, settings["books_subdir"], guid)
+                        if (lang in lang_list or not lang or not lang_list) and (uid != "0" or store_unknown):
+                            author_dir = os.path.join(work_dir, settings["books_subdir"], uid)
                             os.makedirs(author_dir, exist_ok=True)
 
                             book_file_path = os.path.join(author_dir, book_file_name)
@@ -450,7 +460,7 @@ def main():
 
                             # сохраняем данные о книге
                             if store_metadata and book_file_exists:
-                                metadata_path = os.path.join(work_dir, settings["metadata_subdir"], guid)
+                                metadata_path = os.path.join(work_dir, settings["metadata_subdir"], uid)
                                 os.makedirs(metadata_path, exist_ok=True)
                                 metadata_file_path = os.path.join(metadata_path, file_name.split('.')[0] + ".json")
                                 if not os.path.exists(metadata_file_path):
@@ -477,7 +487,7 @@ def main():
                                 with open(catalog_path, 'a', encoding='utf-8') as catalog_file:
                                     catalog_file.write(
                                         json.dumps(
-                                            {book_file_name: [guid, create_index(author, title), os.path.getsize(book_file_path)]}, 
+                                            {book_file_name: [uid, create_index(author, title), os.path.getsize(book_file_path)]}, 
                                             ensure_ascii=False
                                         ) 
                                         + 
@@ -487,7 +497,7 @@ def main():
                         else:
                             file_state = "пропущен"
 
-                        logging.info(f"{file_count}: <{lang or 'N/A'}> {guid} [{author}] <- \"{file_name}\" ({file_state})")
+                        logging.info(f"{file_count}: <{lang or 'N/A'}> {uid} [{author}] <- \"{book_file_name}\" ({file_state}) <- \"{file_name}\"")
                     else:
                         file_state = "обработан ранее"
                         logging.info(f"{file_count}: \"{file_name}\" ({file_state})")
