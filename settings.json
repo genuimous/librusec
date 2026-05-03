@@ -4,6 +4,5 @@
     "compress": "zip:9",
     "save_history": true,
     "books_subdir": "books",
-    "metadata_subdir": "metadata",
-    "index_subdir": "index"
+    "metadata_subdir": "metadata"
 }

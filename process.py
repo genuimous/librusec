@@ -169,6 +169,7 @@ def main():
     parser.add_argument("-s", "--skip-existing", action="store_true", help="Пропускать обработанные книги")
     parser.add_argument("-u", "--store-unknown", action="store_true", help="Хранить книги без авторов")
     parser.add_argument("-m", "--store-metadata", action="store_true", help="Хранить данные о книгах")
+    parser.add_argument("-t", "--test-mode", action="store_true", help="Не сохранять новые книги")
     parser.add_argument("-g", "--no-gzip", action="store_true", help="Не cжимать словари")
     args = parser.parse_args()
 
@@ -176,6 +177,7 @@ def main():
     skip_existing = args.skip_existing
     store_unknown = args.store_unknown
     store_metadata = args.store_metadata
+    test_mode = args.test_mode
     no_gzip = args.no_gzip
 
     program_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -331,10 +333,15 @@ def main():
             logging.error(f"Не удалось прочитать файл со списком книг \"{catalog_path}\": {e}")
             return
 
-    zip_list = [f for f in os.listdir(archive_dir) if f.lower().endswith('.zip')]
+    # получение перечня архивов
+    zip_list = []
+    for root, dirs, files in os.walk(archive_dir):
+        for current_file in files:
+            if current_file.lower().endswith('.zip'):
+                zip_list.append(os.path.join(root, current_file))
+
     if not zip_list:
-        logging.error(f"В каталоге \"{archive_dir}\" нет zip-архивов")
-        return
+        logging.warning(f"В каталоге \"{archive_dir}\" и его подкаталогах нет zip-архивов")
 
     all_file_count = 0
     all_new_file_count = 0
@@ -342,21 +349,24 @@ def main():
     authors_changed = False
     catalog_changed = False
 
-    for zip_name in zip_list:
-        logging.info(f">>> Обработка архива \"{zip_name}\"...")
+    # перебор найденных архивов
+    for zip_path in zip_list:
+        zip_name = os.path.basename(zip_path)
 
-        zip_path = os.path.join(archive_dir, zip_name)
         stats = os.stat(zip_path)
         archive_key = f"{zip_name}:{stats.st_size}:{stats.st_mtime}"
 
         # обработанные ранее архивы пропускаем
         if archive_key in history and not ignore_history:
-            logging.info(f"Уже был обработан ранее")
+            logging.info(f"\"{zip_name}\" уже был обработан ранее")
             continue
+
+        logging.info(f">>> Обработка архива \"{zip_name}\"...")
 
         try:
             file_ext = settings["format"]
             file_ext = "." + file_ext if not file_ext.startswith(".") else file_ext
+
             file_count = 0
             new_file_count = 0
 
@@ -372,9 +382,9 @@ def main():
                     if compresstype == "none":
                         book_file_name = file_name
                     else:
-                        book_file_name = os.path.splitext(file_name)[0] + compressext.get(compresstype, "")
+                        book_file_name = os.path.splitext(os.path.basename(file_name))[0] + compressext.get(compresstype, "")
 
-                    if not skip_existing or book_file_name not in existing_books
+                    if not skip_existing or book_file_name not in existing_books:
                         # попытка определить данные о книге
                         encoding, lang, author, title, genre, version, date, annotation = get_book_info(zip, file_name)
 
@@ -410,12 +420,13 @@ def main():
                             book_file_path = os.path.join(author_dir, book_file_name)
 
                             # копирование/переупаковка файла
-                            if not os.path.exists(book_file_path):
-                                with zip.open(file_name) as archive:
-                                    source_file = archive.read()
+                            book_file_exists = os.path.exists(book_file_path)
+                            if not test_mode and not book_file_exists:
+                                with zip.open(file_name) as archived_data:
+                                    source_file = archived_data.read()
                                 if compresstype == "zip":
                                     with zipfile.ZipFile(book_file_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as target_file:
-                                        target_file.writestr(file_name, source_file)
+                                        target_file.writestr(os.path.basename(file_name), source_file)
                                 elif compresstype == "gzip":
                                     with gzip.open(book_file_path, 'wb', compresslevel=compresslevel) as target_file:
                                         target_file.write(source_file)
@@ -427,17 +438,18 @@ def main():
                                         target_file.write(source_file)
                                 elif compresstype == "7z":
                                     with py7zr.SevenZipFile(book_file_path, 'w') as target_file:
-                                        target_file.writestr(source_file, file_name)
+                                        target_file.writestr(source_file, os.path.basename(file_name))
                                 elif compresstype == "none":
                                     with open(book_file_path, 'wb') as target_file:
                                         target_file.write(source_file)
 
+                                book_file_exists = True
                                 new_file_count += 1
                             else:
                                 file_state = "уже есть"
 
                             # сохраняем данные о книге
-                            if store_metadata:
+                            if store_metadata and book_file_exists:
                                 metadata_path = os.path.join(work_dir, settings["metadata_subdir"], guid)
                                 os.makedirs(metadata_path, exist_ok=True)
                                 metadata_file_path = os.path.join(metadata_path, file_name.split('.')[0] + ".json")
@@ -460,7 +472,7 @@ def main():
                                         )
 
                             # добавляем книгу в базу
-                            if book_file_name not in existing_books:
+                            if book_file_name not in existing_books and book_file_exists:
                                 existing_books.add(book_file_name)
                                 with open(catalog_path, 'a', encoding='utf-8') as catalog_file:
                                     catalog_file.write(
