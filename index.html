@@ -1,0 +1,185 @@
+﻿<!DOCTYPE html>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<link rel="icon" type="image/svg+xml" href="favicon.svg">
+		<title>Library Index</title>
+		<style>
+			h1 { text-align: center; }
+			#search { width: 100%; padding: 15px; font-size: 18px; border: 2px solid #007bff; border-radius: 8px; box-sizing: border-box; outline: none; }
+			#search:focus { box-shadow: 0 0 8px rgba(0,123,255,0.5); }
+			#status { color: #555; font-size: 14px; margin-top: 10px; font-style: italic; }
+			#results { margin-top: 20px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+			#empty { padding:20px; color: #999; }
+			.book-item { border-bottom: 1px solid #eee; display: flex; justify-content: space-between; padding: 10px 10px; align-items: center; }
+			.book-item:last-child { border-bottom: none; }
+			.book-item:hover { background: #f1f7ff; }
+			.book-item .name { flex: 1; min-width: 0; margin-left: 5px; margin-right: 5px; }
+			.book-item .name a { color: #007bff; text-decoration: none; font-weight: bold; line-height: 1.4; display: block; overflow-wrap: break-word; }
+			.book-item .comment { margin-left: 5px; font-family: 'Courier New', monospace; color: #666; font-size: 0.85em; background: #eee; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+			.book-item .download { margin-right: 5px; }
+		</style>
+		<svg style="display: none;">
+			<symbol id="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+				<polyline points="7 10 12 15 17 10"></polyline>
+				<line x1="12" y1="15" x2="12" y2="3"></line>
+			</symbol>
+		</svg>
+	</head>
+	<body style="font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 15px; background-color: #f4f4f4;">
+		<h1>Library Index</h1>
+		<input type="text" id="search" placeholder="Type to search..." disabled>
+		<div id="status">Loading database, please wait...</div>
+		<div id="results"></div>
+		<script>
+			const startTime = performance.now();
+
+			let catalogData = [];
+			const searchInput = document.getElementById('search');
+			const statusDiv = document.getElementById('status');
+			const resultsDiv = document.getElementById('results');
+
+			let debounceTimer;
+
+			function highlight(text, query) {
+				if (!query) return text;
+				const regex = new RegExp(`(${query})`, 'gi');
+				return text.replace(regex, '<mark style="background: #ffeb3b; padding: 0 2px; border-radius: 2px;">$1</mark>');
+			}
+
+			function removeExtension(filename) {
+				var index = filename.lastIndexOf('.');
+				if (index < 1) {
+					return filename;
+				}
+				
+				return filename.slice(0, index);
+			}
+
+			fetch('catalog.json')
+				.then(response => {
+					if (!response.ok) throw new Error('Database not found');
+					return response.text();
+				})
+				.then(text => {
+					const lines = text.trim().split('\n');
+
+					catalogData = lines.map(line => {
+						try {
+							const obj = JSON.parse(line);
+							const file = Object.keys(obj)[0];
+							const [guid, index, size] = obj[file];
+							
+							return [file, guid, index, size]; 
+						} 
+						catch (e) { 
+							return null; 
+						}
+					}).filter(item => item !== null);
+
+					catalogData.sort((a, b) => a[2].localeCompare(b[2]));
+
+					const duration = ((performance.now() - startTime) / 1000).toFixed(3);
+					statusDiv.innerText = `Database loaded in ${duration}s (${catalogData.length} records)`;
+
+					searchInput.disabled = false;
+					searchInput.focus();
+				})
+				.catch(e => {
+					statusDiv.style.color = "red";
+					statusDiv.innerText = "Database unavailable";
+					console.error(e);
+				});
+
+			window.showMetadata = function(url) {
+				const modal = document.getElementById('modal');
+				const content = document.getElementById('modal-content');
+				
+				modal.style.display = 'flex';
+				modal.style.alignItems = 'center'; 
+				modal.style.justifyContent = 'center'; 
+				modal.style.paddingTop = '0px'; 
+				
+				content.innerHTML = '<div style="color:#2c3e50; text-align: center;">Loading metadata...</div>';
+
+				fetch(url)
+					.then(res => res.json())
+					.then(data => {
+						const addRow = (label, value) => {
+							if (!value) return ''; 
+							return '<tr>' +
+								'<td style="padding:2px 5px 2px 0; color:#666; width:80px; border:none; vertical-align:top;">' + label + ':</td>' +
+								'<td style="padding:2px 0; font-weight:600; border:none;">' + value + '</td>' +
+								'</tr>';
+							};
+
+						let html = '<div style="font-family:sans-serif; color:#333; text-align:left; line-height:1.2;">';
+
+						// title
+						html += '<div style="font-size:1.3em; font-weight:bold; color:#2c3e50; margin-bottom:10px;">' + data.title + '</div>';
+						// table
+						html += '<table style="border-collapse:collapse; width:100%; font-size:14px; border:none; line-height:1.2;">';
+						html += addRow('Author', data.author);
+						html += addRow('Genre', data.genre);
+						html += addRow('Lang', data.lang);
+						html += addRow('Date', data.date);
+						html += addRow('Version', data.version);
+						html += addRow('Encoding', data.encoding);
+						html += '</table>';
+						// annotation
+						if (data.annotation) html += '<div style="margin-top:10px; padding:10px; background:#f9f9f9; border-left:4px solid #ffeb3b; line-height:1.4; font-size:14px; text-align:justify; white-space:normal!important;">' + data.annotation + '</div>';
+
+						html += '</div>';
+
+						content.innerHTML = html;
+					})
+					.catch(e => {
+						content.innerHTML = '<div style="color:#2c3e50; text-align: center;">No metadata</div>';
+						console.error(e);
+					});
+			};
+
+			searchInput.addEventListener('input', (e) => {
+				clearTimeout(debounceTimer);
+
+				debounceTimer = setTimeout(() => {
+					const query = e.target.value.toLowerCase().trim();
+					resultsDiv.innerHTML = '';
+
+					if (query.length < 3) return;
+
+					const filtered = catalogData.filter(item => item[2].toLowerCase().includes(query)).slice(0, 100);
+
+					if (filtered.length === 0) {
+						resultsDiv.innerHTML = '<div id="empty">No results</div>';
+						return;
+					}
+
+					resultsDiv.innerHTML = filtered.map(item => `
+						<div class="book-item">
+							<div class="download"><a href="books/${item[1]}/${item[0]}" title="Download (${item[0]}, ${Math.ceil((item[3] / 1024 / 1024) * 10) / 10} MB)"><svg width="20" height="20"><use href="#icon-download"/></svg></a></div>
+							<div class="name"><a href="#" onclick="showMetadata('metadata/${item[1]}/${removeExtension(item[0])}.json'); return false;">${highlight(item[2], query)}</a></div>
+							<div class="comment">id: ${removeExtension(item[0])}</div>
+						</div>
+					`).join('');
+				}, 300); 
+			});
+
+			document.addEventListener('keydown', (e) => {
+				if (e.key === "Escape") {
+					const modal = document.getElementById('modal');
+					if (modal.style.display === 'flex') {
+						modal.style.display = 'none';
+					}
+				}
+			});
+		</script>
+		<div id="modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1000; align-items:center; justify-content:center; font-family: sans-serif;">
+			<div style="background:white; padding:20px; border-radius:8px; width: fit-content; max-width:90%; max-width:600px; min-width:150px; max-height:90%; overflow:auto; position:relative; box-shadow: 0 5px 15px rgba(0,0,0,0.5);">
+				<button onclick="document.getElementById('modal').style.display='none'" style="position:absolute; right:5px; top:5px; background:none; border:none; font-size:16px; font-weight: bold; cursor:pointer;">&times;</button>
+				<div id="modal-content" style="margin-top:10px; font-size: 14px; line-height: 1.4; color: #333; overflow-wrap: break-word;"></div>
+			</div>
+		</div>
+	</body>
+</html>
