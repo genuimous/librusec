@@ -370,11 +370,11 @@ def main():
 
                     # имя целевого файла
                     if compresstype == "none":
-                        book_name = file_name
+                        book_file_name = file_name
                     else:
-                        book_name = os.path.splitext(file_name)[0] + compressext.get(compresstype, "")
+                        book_file_name = os.path.splitext(file_name)[0] + compressext.get(compresstype, "")
 
-                    if not skip_existing or book_name not in existing_books:
+                    if not skip_existing or book_file_name not in existing_books
                         # попытка определить данные о книге
                         encoding, lang, author, title, genre, version, date, annotation = get_book_info(zip, file_name)
 
@@ -407,29 +407,29 @@ def main():
                             author_dir = os.path.join(work_dir, settings["books_subdir"], guid)
                             os.makedirs(author_dir, exist_ok=True)
 
-                            book_path = os.path.join(author_dir, book_name)
+                            book_file_path = os.path.join(author_dir, book_file_name)
 
                             # копирование/переупаковка файла
-                            if not os.path.exists(book_path):
+                            if not os.path.exists(book_file_path):
                                 with zip.open(file_name) as archive:
                                     source_file = archive.read()
                                 if compresstype == "zip":
-                                    with zipfile.ZipFile(book_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as target_file:
+                                    with zipfile.ZipFile(book_file_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as target_file:
                                         target_file.writestr(file_name, source_file)
                                 elif compresstype == "gzip":
-                                    with gzip.open(book_path, 'wb', compresslevel=compresslevel) as target_file:
+                                    with gzip.open(book_file_path, 'wb', compresslevel=compresslevel) as target_file:
                                         target_file.write(source_file)
                                 elif compresstype == "bzip2":
-                                    with bz2.open(book_path, 'wb', compresslevel=compresslevel) as target_file:
+                                    with bz2.open(book_file_path, 'wb', compresslevel=compresslevel) as target_file:
                                         target_file.write(source_file)
                                 elif compresstype == "lzma":
-                                    with lzma.open(book_path, 'wb', preset=compresslevel) as target_file:
+                                    with lzma.open(book_file_path, 'wb', preset=compresslevel) as target_file:
                                         target_file.write(source_file)
                                 elif compresstype == "7z":
-                                    with py7zr.SevenZipFile(book_path, 'w') as target_file:
+                                    with py7zr.SevenZipFile(book_file_path, 'w') as target_file:
                                         target_file.writestr(source_file, file_name)
                                 elif compresstype == "none":
-                                    with open(book_path, 'wb') as target_file:
+                                    with open(book_file_path, 'wb') as target_file:
                                         target_file.write(source_file)
 
                                 new_file_count += 1
@@ -441,30 +441,31 @@ def main():
                                 metadata_path = os.path.join(work_dir, settings["metadata_subdir"], guid)
                                 os.makedirs(metadata_path, exist_ok=True)
                                 metadata_file_path = os.path.join(metadata_path, file_name.split('.')[0] + ".json")
-                                with open(metadata_file_path, 'w', encoding='utf-8') as metadata_file:
-                                    json.dump(
-                                        {
-                                            "encoding": encoding,
-                                            "lang": lang,
-                                            "author": author,
-                                            "title": title,
-                                            "genre": genre,
-                                            "version": version,
-                                            "date": date,
-                                            "annotation": annotation
-                                        }, 
-                                        metadata_file, 
-                                        ensure_ascii=False, 
-                                        indent=0
-                                    )
+                                if not os.path.exists(metadata_file_path):
+                                    with open(metadata_file_path, 'w', encoding='utf-8') as metadata_file:
+                                        json.dump(
+                                            {
+                                                "encoding": encoding,
+                                                "lang": lang,
+                                                "author": author,
+                                                "title": title,
+                                                "genre": genre,
+                                                "version": version,
+                                                "date": date,
+                                                "annotation": annotation
+                                            }, 
+                                            metadata_file, 
+                                            ensure_ascii=False, 
+                                            indent=0
+                                        )
 
                             # добавляем книгу в базу
-                            if book_name not in existing_books:
-                                existing_books.add(book_name)
+                            if book_file_name not in existing_books:
+                                existing_books.add(book_file_name)
                                 with open(catalog_path, 'a', encoding='utf-8') as catalog_file:
                                     catalog_file.write(
                                         json.dumps(
-                                            {book_name: [guid, create_index(author, title), os.path.getsize(book_path)]}, 
+                                            {book_file_name: [guid, create_index(author, title), os.path.getsize(book_file_path)]}, 
                                             ensure_ascii=False
                                         ) 
                                         + 
