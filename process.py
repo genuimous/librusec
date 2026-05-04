@@ -160,8 +160,8 @@ def get_book_info(zip, file_name):
 
 def main():
     parser = argparse.ArgumentParser(description="Сценарий сортировки архива библиотеки Librusec")
-    parser.add_argument("-r", "--archive-dir", help="Путь к каталогу с архивами")
     parser.add_argument("-w", "--work-dir", help="Путь к рабочему каталогу")
+    parser.add_argument("-r", "--archive-dir", help="Путь к каталогу с архивами")
     parser.add_argument("-a", "--authors-path", help="Путь к файлу авторов")
     parser.add_argument("-c", "--catalog-path", help="Путь к файлу каталога")
     parser.add_argument("-l", "--log", help="Файл протокола")
@@ -181,8 +181,8 @@ def main():
     no_gzip = args.no_gzip
 
     program_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    archive_dir = args.archive_dir or input("Введите путь к каталогу с архивами: ").strip().strip('"')
     work_dir = args.work_dir or input("Введите путь к рабочему каталогу: ").strip().strip('"')
+    archive_dir = args.archive_dir or input("Введите путь к каталогу с архивами: ").strip().strip('"')
     authors_path = args.authors_path or os.path.join(work_dir, "authors.json")
     catalog_path = args.catalog_path or os.path.join(work_dir, "catalog.json")
     index_path = os.path.join(work_dir, "index.html")
