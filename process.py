@@ -65,6 +65,13 @@ def create_index(author, title):
     # cклеиваем автора и очищенный заголовок
     return f"{author} {' '.join(filtered_title)}"
 
+def get_book_uid(file_name, format_ext):
+    book_file_name = os.path.basename(file_name).lower()
+    book_uid = os.path.splitext(book_file_name)[0]
+    if book_uid.endswith(format_ext) and book_file_name.endswith((".zip", ".gz", ".bz2", ".xz", ".7z")):
+        book_uid = os.path.splitext(book_uid)[0]
+    return book_uid
+
 def get_book_info(zip, file_name):
     search_flags = re.DOTALL | re.IGNORECASE
 
@@ -169,6 +176,7 @@ def main():
     parser.add_argument("-s", "--skip-existing", action="store_true", help="Пропускать обработанные книги")
     parser.add_argument("-u", "--store-unknown", action="store_true", help="Хранить книги без авторов")
     parser.add_argument("-m", "--store-metadata", action="store_true", help="Хранить данные о книгах")
+    parser.add_argument("-p", "--repack", action="store_true", help="Переупаковывать уже сжатые")
     parser.add_argument("-t", "--test-mode", action="store_true", help="Не сохранять новые книги")
     parser.add_argument("-g", "--no-gzip", action="store_true", help="Не cжимать словари")
     args = parser.parse_args()
@@ -177,6 +185,7 @@ def main():
     skip_existing = args.skip_existing
     store_unknown = args.store_unknown
     store_metadata = args.store_metadata
+    repack = args.repack
     test_mode = args.test_mode
     no_gzip = args.no_gzip
 
@@ -235,6 +244,9 @@ def main():
     settings["metadata_subdir"] = settings.get("metadata_subdir", "metadata")
     settings["author_ident"] = settings.get("author_ident", "guid")
 
+    format_ext = settings["format"]
+    format_ext = "." + format_ext if not format_ext.startswith(".") else format_ext
+
     # допустимые языки
     lang_list = {}
     if settings["lang_list"]:
@@ -243,8 +255,7 @@ def main():
     # сжатие
     compress = settings["compress"].split(":")
     compresstype = compress[0].strip()
-    if not compresstype or compresstype == "none":
-        compresstype = "none"
+    if compresstype == "":
         logging.warning("Тип сжатия не установлен")
     elif compresstype in ("zip", "gzip", "gz", "bzip2", "bz2", "lzma", "xz"):
         try:
@@ -318,8 +329,9 @@ def main():
             logging.error(f"Не удалось прочитать файл со списком авторов \"{authors_path}\": {e}")
             return
 
-    # загружаем имена обработанных ранее книг
-    existing_books = set()
+    # загружаем список имеющихся книг
+    book_uids = set()
+    book_file_names = set()
     if os.path.exists(catalog_path):
         try:
             with open(catalog_path, 'r', encoding='utf-8') as catalog_file:
@@ -327,8 +339,9 @@ def main():
                     data = json.loads(line)
                     for file_name in data:
                         if file_name:
-                            existing_books.add(file_name)
-            logging.info(f"Имеющихся книг: {len(existing_books)}")
+                            book_uids.add(get_book_uid(file_name, format_ext))
+                            book_file_names.add(file_name.lower())
+            logging.info(f"Имеющихся книг: {len(book_uids)}")
         except Exception as e:
             logging.error(f"Не удалось прочитать файл со списком книг \"{catalog_path}\": {e}")
             return
@@ -350,43 +363,36 @@ def main():
     catalog_changed = False
 
     # перебор найденных архивов
-    for zip_path in zip_list:
-        zip_name = os.path.basename(zip_path)
+    for zip_file_path in zip_list:
+        zip_file_name = os.path.basename(zip_file_path)
 
-        stats = os.stat(zip_path)
-        archive_key = f"{zip_name}:{stats.st_size}:{stats.st_mtime}"
+        stats = os.stat(zip_file_path)
+        archive_key = f"{zip_file_name}:{stats.st_size}:{stats.st_mtime}"
 
         # обработанные ранее архивы пропускаем
         if archive_key in history and not ignore_history:
-            logging.info(f"\"{zip_name}\" уже был обработан ранее")
+            logging.info(f"\"{zip_file_name}\" уже был обработан ранее")
             continue
 
-        logging.info(f">>> Обработка архива \"{zip_name}\"...")
+        logging.info(f">>> Обработка архива \"{zip_file_name}\"...")
 
         try:
-            file_ext = settings["format"]
-            file_ext = "." + file_ext if not file_ext.startswith(".") else file_ext
-
             file_count = 0
             new_file_count = 0
 
-            with zipfile.ZipFile(zip_path, 'r') as zip:
-                file_list = [f for f in zip.namelist() if f.lower().endswith(file_ext)]
-                logging.info(f"Количество файлов {settings['format']} в архиве: {len(file_list)}")
+            with zipfile.ZipFile(zip_file_path, 'r') as zip:
+                file_list = [f for f in zip.namelist() if f.lower().endswith(format_ext)]
+                archive_capacity = len(file_list)
+                logging.info(f"Количество файлов {settings['format']} в архиве: {archive_capacity}")
 
                 for file_name in file_list:
                     file_count += 1
                     file_state = "новый файл"
 
-                    # имя целевого файла
-                    if compresstype == "none":
-                        book_file_name = os.path.basename(file_name)
-                    elif compresstype == "zip" or compresstype == "7z":
-                        book_file_name = os.path.splitext(os.path.basename(file_name))[0] + compressext.get(compresstype, "")
-                    else:
-                        book_file_name = os.path.splitext(os.path.basename(file_name))[0] + file_ext + compressext.get(compresstype, "")
+                    # uid книги
+                    book_uid = get_book_uid(file_name, format_ext)
 
-                    if not skip_existing or book_file_name not in existing_books:
+                    if not skip_existing or book_uid not in book_uids:
                         # попытка определить данные о книге
                         encoding, lang, author, title, genre, version, date, annotation = get_book_info(zip, file_name)
 
@@ -427,31 +433,45 @@ def main():
                             author_dir = os.path.join(work_dir, settings["books_subdir"], uid)
                             os.makedirs(author_dir, exist_ok=True)
 
+                            # имя целевого файла
+                            book_file_name = os.path.basename(file_name).lower()
+                            if compresstype == "zip" or compresstype == "7z":
+                                book_file_name = os.path.splitext(book_file_name)[0] + compressext.get(compresstype, "")
+                            elif compresstype:
+                                book_file_name = book_file_name + compressext.get(compresstype, "")
+                            else:
+                                pass
+
                             book_file_path = os.path.join(author_dir, book_file_name)
 
                             # копирование/переупаковка файла
                             book_file_exists = os.path.exists(book_file_path)
                             if not test_mode and not book_file_exists:
-                                with zip.open(file_name) as archived_data:
-                                    source_file = archived_data.read()
-                                if compresstype == "zip":
-                                    with zipfile.ZipFile(book_file_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as target_file:
-                                        target_file.writestr(os.path.basename(file_name), source_file)
-                                elif compresstype == "gzip":
-                                    with gzip.open(book_file_path, 'wb', compresslevel=compresslevel) as target_file:
-                                        target_file.write(source_file)
-                                elif compresstype == "bzip2":
-                                    with bz2.open(book_file_path, 'wb', compresslevel=compresslevel) as target_file:
-                                        target_file.write(source_file)
-                                elif compresstype == "lzma":
-                                    with lzma.open(book_file_path, 'wb', preset=compresslevel) as target_file:
-                                        target_file.write(source_file)
-                                elif compresstype == "7z":
-                                    with py7zr.SevenZipFile(book_file_path, 'w') as target_file:
-                                        target_file.writestr(source_file, os.path.basename(file_name))
-                                elif compresstype == "none":
-                                    with open(book_file_path, 'wb') as target_file:
-                                        target_file.write(source_file)
+                                # если в архиве только один файл, и нужен zip, то вместо повторного сжатия - копируем как есть
+                                if archive_capacity == 1 and compresstype == "zip" and not repack:
+                                    shutil.copyfile(zip_file_path, book_file_path)
+                                    file_state = "новый файл, готовый ZIP"
+                                else:
+                                    with zip.open(file_name) as archived_data:
+                                        source_file = archived_data.read()
+                                    if compresstype == "zip":
+                                        with zipfile.ZipFile(book_file_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as target_file:
+                                            target_file.writestr(os.path.basename(file_name), source_file)
+                                    elif compresstype == "gzip":
+                                        with gzip.open(book_file_path, 'wb', compresslevel=compresslevel) as target_file:
+                                            target_file.write(source_file)
+                                    elif compresstype == "bzip2":
+                                        with bz2.open(book_file_path, 'wb', compresslevel=compresslevel) as target_file:
+                                            target_file.write(source_file)
+                                    elif compresstype == "lzma":
+                                        with lzma.open(book_file_path, 'wb', preset=compresslevel) as target_file:
+                                            target_file.write(source_file)
+                                    elif compresstype == "7z":
+                                        with py7zr.SevenZipFile(book_file_path, 'w') as target_file:
+                                            target_file.writestr(source_file, os.path.basename(file_name))
+                                    elif compresstype == "":
+                                        with open(book_file_path, 'wb') as target_file:
+                                            target_file.write(source_file)
 
                                 book_file_exists = True
                                 new_file_count += 1
@@ -482,8 +502,8 @@ def main():
                                         )
 
                             # добавляем книгу в базу
-                            if book_file_name not in existing_books and book_file_exists:
-                                existing_books.add(book_file_name)
+                            if book_file_name not in book_file_names and book_file_exists:
+                                book_file_names.add(book_file_name)
                                 with open(catalog_path, 'a', encoding='utf-8') as catalog_file:
                                     catalog_file.write(
                                         json.dumps(
@@ -494,6 +514,8 @@ def main():
                                         "\n"
                                     )
                                 catalog_changed = True
+
+                            book_uids.add(book_uid)
                         else:
                             file_state = "пропущен"
 
