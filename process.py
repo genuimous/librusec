@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import sys
 import datetime
 import zipfile
@@ -149,21 +149,20 @@ def get_book_info(zip, file_name):
                 if first_name:
                     name_parts.append(re.sub(r'<.*?>', '', first_name.group(1)).strip()[:256])
                 if middle_name:
-                    name_parts.append(re.sub(r'<.*?>', '', middle_name.group(1)).strip()[:256])  
+                    name_parts.append(re.sub(r'<.*?>', '', middle_name.group(1)).strip()[:256])
                 if last_name:
                     name_parts.append(re.sub(r'<.*?>', '', last_name.group(1)).strip()[:256])
                 # фильтруем пустые части и объединяем
                 author = html.unescape(" ".join([p for p in name_parts if p]))
 
-                if author: 
-                    break 
+                if author:
+                    break
 
             # ищем блок <book-title>
             title_match = re.search(r'<book-title>(.*?)</book-title>', text, search_flags)
             if title_match:
                 title = html.unescape(re.sub(r'<.*?>', '', title_match.group(1)).strip()[:256])
                 title = " ".join(title.split()) if title else ""
-
 
             if not title:
                 # ищем блок <title>
@@ -330,11 +329,11 @@ def main():
     if compresstype:
         if compresstype == "gzip": compresstype = "gz"
         if compresstype == "bzip2": compresstype = "bz2"
-        if compresstype == "lzma": compresstype = "xz"        
+        if compresstype == "lzma": compresstype = "xz"
         if compresstype == "7zip": compresstype = "7z"
 
         if compresslevel is not None:
-            logging.info(f"Установлено сжатие \"{compresstype}\", уровень {compresslevel}")     
+            logging.info(f"Установлено сжатие \"{compresstype}\", уровень {compresslevel}")
         else:
             logging.info(f"Установлено сжатие \"{compresstype}\"")
     else:
@@ -537,7 +536,7 @@ def main():
     all_new_file_count = 0
 
     used_langs = collections.Counter()
-    skipped_langs = collections.Counter()    
+    skipped_langs = collections.Counter()
     no_langs = 0
 
     # перебор найденных архивов
@@ -642,14 +641,7 @@ def main():
                                     authors[author.lower()] = uid
                                     if not test_mode:
                                         with open(authors_path, 'a', encoding='utf-8') as dictionary:
-                                            dictionary.write(
-                                                json.dumps(
-                                                    {author: uid}, 
-                                                    ensure_ascii=False
-                                                ) 
-                                                + 
-                                                "\n"
-                                            )
+                                            dictionary.write(json.dumps({author: uid}, ensure_ascii=False) + "\n")
                                 else:
                                     uid = authors[author.lower()]
                             else:
@@ -668,7 +660,7 @@ def main():
                             book_file_path = os.path.join(book_path, book_file_name)
 
                             # файл метаданных
-                            metadata_file_name =  replace_ext(os.path.basename(current_file_name).lower(), ".json") 
+                            metadata_file_name =  replace_ext(os.path.basename(current_file_name).lower(), ".json")
                             metadata_path = os.path.join(work_dir, settings["metadata_subdir"], uid)  
                             metadata_file_path = os.path.join(metadata_path, metadata_file_name) 
 
@@ -762,7 +754,7 @@ def main():
                     finally:
                         if nested:
                             current_zip.close()
-                            buffer = None                         
+                            buffer = None
 
             # сохраняем состояние после каждого успешного архива
             history[archive_key] = datetime.datetime.now().isoformat()
@@ -784,7 +776,7 @@ def main():
         logging.info(f"Использовано языков: {langs_found}")
     if skipped_langs:
         langs_found = ", ".join([f"{lang} ({skipped_langs[lang]})" for lang in sorted(skipped_langs)])
-        logging.info(f"Пропущено языков: {langs_found}")        
+        logging.info(f"Пропущено языков: {langs_found}")
     if no_langs:
         logging.info(f"Без языка: {no_langs}")
 
