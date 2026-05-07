@@ -57,7 +57,7 @@ def set_logger(log):
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
-    
+
     return logger
 
 def replace_ext(file_name, ext, count=1):
@@ -82,18 +82,18 @@ def smart_truncate(text, max_len=4096):
 def create_index(author, title):
     # слова автора для фильтрации (в нижнем регистре)
     author_words = set(re.findall(r'\w+', author.lower()))
-    
+
     # разбивка названия по пробелам
     title_words_orig = title.split()
-    
+
     filtered_title = []
     for word in title_words_orig:
         # очищаем слово от знаков препинания для проверки
         clean_word = re.sub(r'[^\w]', '', word).lower()
-        
+
         if clean_word not in author_words and clean_word != "":
             filtered_title.append(word)
-    
+
     # cклеиваем автора и очищенный заголовок
     return f"{author} {' '.join(filtered_title)}"
 
@@ -119,13 +119,13 @@ def get_book_info(zip, file_name):
     try:
         with zip.open(file_name) as f:
             # читаем начало файла
-            raw_data = f.read(16384) 
-            
+            raw_data = f.read(16384)
+
             # определяем кодировку
             encoding_match = re.search(rb'encoding=["\'](.*?)["\']', raw_data)
             if encoding_match:
                 encoding = encoding_match.group(1).decode('ascii')
-            
+
             if encoding:
                 text = raw_data.decode(encoding, errors='ignore')
             else:
@@ -143,7 +143,7 @@ def get_book_info(zip, file_name):
                 first_name = re.search(r'<first-name>(.*?)</first-name>', author_block, search_flags)
                 last_name = re.search(r'<last-name>(.*?)</last-name>', author_block, search_flags)
                 middle_name = re.search(r'<middle-name>(.*?)</middle-name>', author_block, search_flags)
-                
+
                 # очистка от тегов и лишних пробелов
                 name_parts = []
                 if first_name:
@@ -192,7 +192,7 @@ def get_book_info(zip, file_name):
                 annotation = html.unescape(re.sub(r'<.*?>', '', annotation_match.group(1)).strip()[:8192])
                 annotation = smart_truncate(" ".join(annotation.split())) if annotation else ""
     except:
-        pass 
+        pass
 
     return encoding, lang, author, title, genre, version, date, annotation
 
@@ -204,7 +204,7 @@ def main():
     parser.add_argument("-c", "--catalog-path", help="Путь к файлу каталога")
     parser.add_argument("-l", "--log", help="Файл протокола")
     parser.add_argument("-d", "--delete-before", help="Удалять отсутствующие книги")
-    parser.add_argument("-e", "--clean-empty", action="store_true", help="Очищать от пустых каталогов")    
+    parser.add_argument("-e", "--clean-empty", action="store_true", help="Очищать от пустых каталогов")
     parser.add_argument("-i", "--ignore-history", action="store_true", help="Не загружать историю")
     parser.add_argument("-s", "--skip-existing", action="store_true", help="Пропускать обработанные книги")
     parser.add_argument("-u", "--store-unknown", action="store_true", help="Хранить книги без авторов")
@@ -295,14 +295,14 @@ def main():
         try:
             for item in settings["lang_list"].split(','):
                 lang = item.lower().strip()
-                if lang: 
+                if lang:
                     langs.add(lang)
             if langs:
                 langs_filter = ", ".join(sorted(langs))
                 logging.info(f"Фильтр по языкам: {langs_filter}")
         except Exception as e:
             logging.error(f"Не удалось установить фильтр по языкам: {e}")
-            return        
+            return
 
     # сжатие
     compress = settings["compress"].split(":")
@@ -431,7 +431,7 @@ def main():
             with zipfile.ZipFile(zip_file_path, 'r') as zip:
                 for file_name in (name for name in zip.namelist() if name.lower().endswith((format_ext, archive_ext))):
                     obsolete_uids.discard(get_book_uid(file_name, format_ext))
-                    
+
         if obsolete_uids:
             logging.info(f"Обнаружено {len(obsolete_uids)} книг, отсутствующих в \"{archive_dir}\"")
 
@@ -496,12 +496,12 @@ def main():
                                         book_file_names.discard(file_name)
                                     except Exception as e:
                                         with open(catalog_path, 'a', encoding='utf-8') as catalog:
-                                            catalog.write(line)                                        
+                                            catalog.write(line)
                                         logging.error(f"Не удалось выполнить очистку для uid=\"{uid}\": {e}")
                                 else:
                                     with open(catalog_path, 'a', encoding='utf-8') as catalog:
                                         catalog.write(line)
-                    
+
                     logging.info(f"Очищено файлов книг: {obsolete_book_file_count})")
                     logging.info(f"Очищено файлов метаданных: {obsolete_metadata_file_count})")
                     logging.info(f"Осталось книг: {len(book_uids)} ({len(book_file_names)} файлов)")
@@ -531,7 +531,7 @@ def main():
             logging.info(f"Всего удалено пустых папок в \"{work_dir}\": {empty_dir_count}")
         else:
             logging.info(f"Пустых папок в \"{work_dir}\" не найдено")
-        
+
     all_file_count = 0
     all_new_file_count = 0
 
@@ -621,10 +621,10 @@ def main():
 
                             # нормализация языка
                             lang = lang.lower()
-                            
+
                             # наименование жанра
                             genre = genres.get(genre, genre)
-                            
+
                             # если автор определен
                             if author:
                                 # если новый автор, добавить в базу
@@ -637,7 +637,7 @@ def main():
                                     else:
                                         logging.error(f"Неизвестный тип UID: \"{author_ident}\"")
                                         return
-                                    
+
                                     authors[author.lower()] = uid
                                     if not test_mode:
                                         with open(authors_path, 'a', encoding='utf-8') as dictionary:
@@ -647,7 +647,7 @@ def main():
                             else:
                                 uid = "0"
                                 author = "Неизвестен"
-                            
+
                             # файл книги
                             book_file_name = os.path.basename(current_file_name).lower()
                             if compresstype == "zip" or compresstype == "7z":
@@ -661,8 +661,8 @@ def main():
 
                             # файл метаданных
                             metadata_file_name =  replace_ext(os.path.basename(current_file_name).lower(), ".json")
-                            metadata_path = os.path.join(work_dir, settings["metadata_subdir"], uid)  
-                            metadata_file_path = os.path.join(metadata_path, metadata_file_name) 
+                            metadata_path = os.path.join(work_dir, settings["metadata_subdir"], uid)
+                            metadata_file_path = os.path.join(metadata_path, metadata_file_name)
 
                             if uid != "0" or store_unknown:
                                 if lang in langs or not lang or not langs:
@@ -723,8 +723,8 @@ def main():
                                                         "version": version,
                                                         "date": date,
                                                         "annotation": annotation
-                                                    }, 
-                                                    metadata_file, 
+                                                    },
+                                                    metadata_file,
                                                     ensure_ascii=False
                                                 )
 
@@ -734,10 +734,10 @@ def main():
                                         with open(catalog_path, 'a', encoding='utf-8') as catalog:
                                             catalog.write(
                                                 json.dumps(
-                                                    {book_file_name: [uid, create_index(author, title), os.path.getsize(book_file_path)]}, 
+                                                    {book_file_name: [uid, create_index(author, title), os.path.getsize(book_file_path)]},
                                                     ensure_ascii=False
-                                                ) 
-                                                + 
+                                                )
+                                                +
                                                 "\n"
                                             )
                                     book_uids.add(book_uid)
