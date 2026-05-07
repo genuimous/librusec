@@ -538,7 +538,7 @@ def main():
 
     used_langs = collections.Counter()
     skipped_langs = collections.Counter()    
-    no_lang_count = 0
+    no_langs = 0
 
     # перебор найденных архивов
     for zip_file_path in zip_list:
@@ -677,7 +677,7 @@ def main():
                                     if lang:
                                         used_langs[lang] += 1
                                     else:
-                                        no_lang_count += 1
+                                        no_langs += 1
                                     # копирование/переупаковка файла
                                     if not test_mode and not os.path.exists(book_file_path):
                                         os.makedirs(book_path, exist_ok=True)
@@ -785,7 +785,8 @@ def main():
     if skipped_langs:
         langs_found = ", ".join([f"{lang} ({skipped_langs[lang]})" for lang in sorted(skipped_langs)])
         logging.info(f"Пропущено языков: {langs_found}")        
-    logging.info(f"Без языка: {no_lang_count}")
+    if no_langs:
+        logging.info(f"Без языка: {no_langs}")
 
     # web-оглавление
     try:
