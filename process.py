@@ -1,5 +1,7 @@
 import argparse
 import sys
+import platform
+import time
 import datetime
 import zipfile
 import hashlib
@@ -15,11 +17,10 @@ import shutil
 import collections
 
 def gzip_file(file_name):
-    if os.path.exists(file_name):
-        with open(file_name, 'rb') as f_in:
-            with open(f"{file_name}.gz", 'wb') as f_gz:
-                with gzip.GzipFile(fileobj=f_gz, mode='wb', compresslevel=9, mtime=0) as f_out:
-                    shutil.copyfileobj(f_in, f_out)
+    with open(file_name, 'rb') as source:
+        with open(f"{file_name}.gz", 'wb') as compressed:
+            with gzip.GzipFile(fileobj=compressed, mode='wb', compresslevel=9, mtime=0) as target:
+                shutil.copyfileobj(source, target)
 
 def rotate_file(file_name, ext, depth=10):
     if os.path.exists(file_name):
@@ -59,6 +60,23 @@ def set_logger(log):
     logger.addHandler(console_handler)
 
     return logger
+
+def format_bytes(size):
+    prefix = "-" if size < 0 else ""
+
+    size = abs(float(size))
+    
+    if size >= 1024:
+        units = ["К", "М", "Г", "Т"]
+        unit_index = -1
+
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024
+            unit_index += 1
+
+        return f"{prefix}{size:.2f} {units[unit_index]}байт"
+    else:
+        return f"{prefix}{size} байт"
 
 def replace_ext(file_name, ext, count=1):
     if not ext.startswith("."):
@@ -197,6 +215,10 @@ def get_book_info(zip, file_name):
     return encoding, lang, author, title, genre, version, date, annotation
 
 def main():
+    start_time = datetime.datetime.now()
+
+    system = " ".join((platform.system(), platform.release(), platform.machine()))
+
     parser = argparse.ArgumentParser(description="Сценарий сортировки архива библиотеки Librusec")
     parser.add_argument("-w", "--work-dir", help="Путь к рабочему каталогу")
     parser.add_argument("-r", "--archive-dir", help="Путь к каталогу с архивами")
@@ -240,7 +262,7 @@ def main():
 
     terminal_width = 80
 
-    logging.info(f"Запуск сценария сортировки архива библиотеки Librusec")
+    logging.info(f"Запуск сценария сортировки архива библиотеки Librusec ({system})")
     logging.info("-"*terminal_width)
     for parser_action in parser._actions:
         if parser_action.dest != "help":
@@ -289,6 +311,13 @@ def main():
     archive_ext = ".zip"
     backup_ext = ".bak"
 
+    author_ident = settings["author_ident"]
+    if author_ident not in ("guid", "hash"):
+        logging.error(f"Неизвестный тип UID: \"{author_ident}\"")
+        return
+
+    save_history = settings["save_history"]
+
     # допустимые языки
     langs = set()
     if settings["lang_list"]:
@@ -308,6 +337,7 @@ def main():
     compress = settings["compress"].split(":")
     compresstype = compress[0].strip()
     compresslevel = None
+    
     if compresstype == "":
         pass
     elif compresstype in ("zip", "gzip", "gz", "bzip2", "bz2", "lzma", "xz"):
@@ -544,10 +574,10 @@ def main():
         zip_file_name = os.path.basename(zip_file_path)
 
         stats = os.stat(zip_file_path)
-        archive_key = f"{zip_file_name}:{stats.st_size}:{stats.st_mtime}"
+        key = f"{zip_file_name}:{stats.st_size}:{int(stats.st_mtime)}"
 
         # обработанные ранее архивы пропускаем
-        if archive_key in history and not ignore_history:
+        if key in history and not ignore_history:
             logging.info(f"\"{zip_file_name}\" уже был обработан ранее")
             continue
 
@@ -572,10 +602,20 @@ def main():
                     current_file_name = file_name
 
                     nested = False
+                    nested_key = None
                     buffer = None
 
                     # если это вложенный архив с одним файлом
                     if file_name.lower().endswith(archive_ext):
+                        nested_zip_file_name = os.path.basename(file_name)
+
+                        info = zip.getinfo(file_name)
+                        nested_key = f"{nested_zip_file_name}:{info.file_size}:{int(time.mktime(info.date_time + (0, 0, -1)))}"
+
+                        if nested_key in history and not ignore_history:
+                            logging.info(f"\"{nested_zip_file_name}\" уже был обработан ранее")
+                            continue                        
+
                         buffer = io.BytesIO(zip.read(file_name))
                         try:
                             nested_zip = zipfile.ZipFile(buffer)
@@ -620,28 +660,34 @@ def main():
                             encoding, lang, author, title, genre, version, date, annotation = get_book_info(current_zip, current_file_name)
 
                             # нормализация языка
-                            lang = lang.lower()
+                            if lang:
+                                lang = lang.lower()
 
                             # наименование жанра
-                            genre = genres.get(genre, genre)
+                            genre_title = genres.get(genre)
+                            if genre_title:
+                                genre = genre_title
+                            else:
+                                logging.warning(f"Неизвестный жанр: \"{genre}\"")
 
                             # если автор определен
                             if author:
                                 # если новый автор, добавить в базу
                                 if author.lower() not in authors:
-                                    author_ident = settings["author_ident"]
-                                    if author_ident == "guid":
-                                        uid = uuid.uuid4().hex
-                                    elif author_ident == "hash":
-                                        uid = hashlib.md5(author.lower().encode('utf-8')).hexdigest()
-                                    else:
-                                        logging.error(f"Неизвестный тип UID: \"{author_ident}\"")
-                                        return
+                                    match author_ident:
+                                        case "guid":
+                                            uid = uuid.uuid4().hex
+                                        case "hash":
+                                            uid = hashlib.md5(author.lower().encode('utf-8')).hexdigest()
 
-                                    authors[author.lower()] = uid
-                                    if not test_mode:
-                                        with open(authors_path, 'a', encoding='utf-8') as dictionary:
-                                            dictionary.write(json.dumps({author: uid}, ensure_ascii=False) + "\n")
+                                    if uid:
+                                        authors[author.lower()] = uid
+                                        if not test_mode:
+                                            with open(authors_path, 'a', encoding='utf-8') as dictionary:
+                                                dictionary.write(json.dumps({author: uid}, ensure_ascii=False) + "\n")
+                                    else:
+                                        logging.error(f"Не удалось вычислить UID для автора \"{author}\"")
+                                        return
                                 else:
                                     uid = authors[author.lower()]
                             else:
@@ -650,7 +696,7 @@ def main():
 
                             # файл книги
                             book_file_name = os.path.basename(current_file_name).lower()
-                            if compresstype == "zip" or compresstype == "7z":
+                            if compresstype in ("zip", "7z"):
                                 book_file_name = replace_ext(book_file_name, compresstype)
                             elif compresstype:
                                 book_file_name = book_file_name + replace_ext("", compresstype)
@@ -685,24 +731,26 @@ def main():
                                             file_state = "готовый ZIP"
                                         else:
                                             with current_zip.open(current_file_name) as archived_data:
-                                                if compresstype == "zip":
-                                                    with zipfile.ZipFile(book_file_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as target_file:
-                                                        target_file.writestr(os.path.basename(current_file_name), archived_data.read())
-                                                elif compresstype == "gzip":
-                                                    with gzip.open(book_file_path, 'wb', compresslevel=compresslevel) as target_file:
-                                                        target_file.write(archived_data.read())
-                                                elif compresstype == "bzip2":
-                                                    with bz2.open(book_file_path, 'wb', compresslevel=compresslevel) as target_file:
-                                                        target_file.write(archived_data.read())
-                                                elif compresstype == "lzma":
-                                                    with lzma.open(book_file_path, 'wb', preset=compresslevel) as target_file:
-                                                        target_file.write(archived_data.read())
-                                                elif compresstype == "7z":
-                                                    with py7zr.SevenZipFile(book_file_path, 'w') as target_file:
-                                                        target_file.writestr(archived_data.read(), os.path.basename(current_file_name))
-                                                elif compresstype == "":
-                                                    with open(book_file_path, 'wb') as target_file:
-                                                        target_file.write(archived_data.read())
+                                                data = archived_data.read()
+                                                match compresstype:
+                                                    case "":
+                                                        with open(book_file_path, 'wb') as target:
+                                                            target.write(data)
+                                                    case "zip":
+                                                        with zipfile.ZipFile(book_file_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as target:
+                                                            target.writestr(os.path.basename(current_file_name), data)
+                                                    case "gzip":
+                                                        with gzip.open(book_file_path, 'wb', compresslevel=compresslevel) as target:
+                                                            target.write(data)
+                                                    case "bzip2":
+                                                        with bz2.open(book_file_path, 'wb', compresslevel=compresslevel) as target:
+                                                            target.write(data)
+                                                    case "lzma":
+                                                        with lzma.open(book_file_path, 'wb', preset=compresslevel) as target:
+                                                            target.write(data)
+                                                    case "7z":
+                                                        with py7zr.SevenZipFile(book_file_path, 'w') as target:
+                                                            target.writestr(data, os.path.basename(current_file_name))
 
                                         new_file_count += 1
                                     else:
@@ -725,7 +773,8 @@ def main():
                                                         "annotation": annotation
                                                     },
                                                     metadata_file,
-                                                    ensure_ascii=False
+                                                    ensure_ascii=False,
+                                                    indent=0
                                                 )
 
                                     # добавляем книгу в каталог
@@ -751,16 +800,21 @@ def main():
                             logging.info(f"{file_count}: <{lang or 'N/A'}> {uid} [{author}] <- \"{book_file_name}\" ({file_state}) <- \"{file_name}\"")
                         else:
                             logging.info(f"{file_count}: \"{current_file_name}\" ({file_state})")
+
+                        history[nested_key] = datetime.datetime.now().isoformat()
+                        if save_history:
+                            with open(history_path, 'a', encoding='utf-8') as history_file:
+                                history_file.write(json.dumps({nested_key: history[nested_key]}, ensure_ascii=False) + '\n')
                     finally:
                         if nested:
                             current_zip.close()
                             buffer = None
 
             # сохраняем состояние после каждого успешного архива
-            history[archive_key] = datetime.datetime.now().isoformat()
-            if settings["save_history"]:
+            history[key] = datetime.datetime.now().isoformat()
+            if save_history:
                 with open(history_path, 'a', encoding='utf-8') as history_file:
-                    history_file.write(json.dumps({archive_key: history[archive_key]}, ensure_ascii=False) + '\n')
+                    history_file.write(json.dumps({key: history[key]}, ensure_ascii=False) + '\n')
 
             logging.info(f"Готово (всего файлов: {file_count}, из них новых: {new_file_count})")
 
@@ -783,19 +837,30 @@ def main():
     # web-оглавление
     try:
         shutil.copyfile(os.path.join(program_dir, "index.html"), index_path)
+        logging.info(f"Скопирован файл: \"{index_path}\"...")
     except Exception as e:
         logging.warning(f"Не удалось скопировать \"index.html\": {e}")
     # web-иконка
     try:
         shutil.copyfile(os.path.join(program_dir, "favicon.svg"), favicon_path)
+        logging.info(f"Скопирован файл: \"{favicon_path}\"...")
     except Exception as e:
         logging.warning(f"Не удалось скопировать \"favicon.svg\": {e}")
 
     # сжатие файлов для web
     if use_gzip:
-        gzip_file(authors_path)
-        gzip_file(catalog_path)
-        gzip_file(index_path)
+        for path in [index_path, authors_path, catalog_path]:
+            if os.path.exists(path):
+                logging.info(f"Сжатие файла \"{path}\"...")
+
+                gzip_file(path)
+
+                size = os.stat(path).st_size
+                comp_size = os.stat(path + ".gz").st_size
+                logging.info(f"Готово ({format_bytes(comp_size - size)}, {(size / comp_size):.2f}:1)")
+
+    end_time = datetime.datetime.now()
+    logging.info(f"Время выполнения: {end_time - start_time}")
 
 if __name__ == "__main__":
     main()
