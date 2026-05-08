@@ -117,19 +117,19 @@ def get_book_info(zip, file_name):
     annotation = ""
 
     try:
-        with zip.open(file_name) as f:
+        with zip.open(file_name) as book_file:
             # читаем начало файла
-            raw_data = f.read(16384)
+            data = book_file.read(16384)
 
             # определяем кодировку
-            encoding_match = re.search(rb'encoding=["\'](.*?)["\']', raw_data)
+            encoding_match = re.search(rb'encoding=["\'](.*?)["\']', data)
             if encoding_match:
                 encoding = encoding_match.group(1).decode('ascii')
 
             if encoding:
-                text = raw_data.decode(encoding, errors='ignore')
+                text = data.decode(encoding, errors='ignore')
             else:
-                text = raw_data.decode('utf-8', errors='ignore')
+                text = data.decode('utf-8', errors='ignore')
 
             # ищем блок <lang>
             lang_match = re.search(r'<lang>(.*?)</lang>', text, search_flags)
