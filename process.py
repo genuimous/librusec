@@ -16,6 +16,30 @@ import gzip
 import shutil
 import collections
 
+def format_iso_date_string(text):
+    return datetime.datetime.fromisoformat(text).strftime("%Y-%m-%d в %H:%M:%S")
+
+def load_dictionary(dictionary, file_name, streamable=False):
+    if streamable:
+        with open(file_name, 'r', encoding='utf-8') as dictionary_file:
+            for line in dictionary_file:
+                text = line.strip()
+                if text:
+                    data = json.loads(text)
+                    if data:
+                        key, value = data.popitem()
+                        dictionary[key.lower()] = value
+    else:
+        with open(file_name, "r", encoding="utf-8") as dictionary_file:
+            dictionary = json.load(dictionary_file)
+
+def append_dictionary(dictionary, key, value, file_name=None):
+    if not(key is None or key == ""):
+        dictionary[key.lower()] = value
+        if file_name:
+            with open(file_name, 'a', encoding='utf-8') as dictionary_file:
+                dictionary_file.write(json.dumps({key: value}, ensure_ascii=False) + '\n')
+
 def gzip_file(file_name):
     with open(file_name, 'rb') as source:
         with open(f"{file_name}.gz", 'wb') as compressed:
@@ -97,6 +121,9 @@ def smart_truncate(text, max_len=4096):
         truncated = truncated[:last_space]
     return truncated.rstrip('.,!?; ') + '...'
 
+def file_key(file_name, size, timestamp):
+    return f"{file_name}:{size}:{int(timestamp)}"
+
 def create_index(author, title):
     # слова автора для фильтрации (в нижнем регистре)
     author_words = set(re.findall(r'\w+', author.lower()))
@@ -115,12 +142,12 @@ def create_index(author, title):
     # cклеиваем автора и очищенный заголовок
     return f"{author} {' '.join(filtered_title)}"
 
-def get_book_uid(file_name, format_ext):
-    book_file_name = os.path.basename(file_name).lower()
-    book_uid = os.path.splitext(book_file_name)[0]
-    if book_uid.endswith(format_ext) and book_file_name.endswith((".zip", ".gz", ".bz2", ".xz", ".7z")):
-        book_uid = os.path.splitext(book_uid)[0]
-    return book_uid
+def get_book(file_name, format_ext):
+    file_name = os.path.basename(file_name).lower()
+    uid = os.path.splitext(file_name)[0]
+    if uid.endswith(format_ext) and file_name.endswith((".zip", ".gz", ".bz2", ".xz", ".7z")):
+        uid = os.path.splitext(uid)[0]
+    return uid
 
 def get_book_info(zip, file_name):
     search_flags = re.DOTALL | re.IGNORECASE
@@ -242,6 +269,9 @@ def main():
     archive_dir = args.archive_dir or input("Введите путь к каталогу с архивами: ").strip().strip('"')
     authors_path = args.authors_path or os.path.join(work_dir, "authors.json")
     catalog_path = args.catalog_path or os.path.join(work_dir, "catalog.json")
+    history_path = os.path.join(program_dir, "history.json")
+    genres_path = os.path.join(program_dir, "genres.json")
+    exclusions_path = os.path.join(program_dir, "exclusions.txt")
     index_path = os.path.join(work_dir, "index.html")
     favicon_path = os.path.join(work_dir, "favicon.svg")
     log = args.log or os.path.join(program_dir, "process.log")
@@ -371,48 +401,38 @@ def main():
 
     # жанры
     genres = {}
-    genres_file_path = os.path.join(program_dir, "genres.json")
-    if os.path.exists(genres_file_path):
+    if os.path.exists(genres_path):
         try:
-            with open(genres_file_path, "r", encoding="utf-8") as genres_file:
-                genres = json.load(genres_file)
-            logging.info(f"Загружены жанры из файла \"{genres_file_path}\"")
+            load_dictionary(genres, genres_path)
+            logging.info(f"Загружены жанры из файла \"{genres_path}\"")
         except Exception as e:
-            logging.error(f"Не удалось прочитать файл жанров \"{genres_file_path}\": {e}")
+            logging.error(f"Не удалось прочитать файл жанров \"{genres_path}\": {e}")
             return
     else:
-        logging.warning(f"Отсутствует файл жанров \"{genres_file_path}\"")
+        logging.warning(f"Отсутствует файл жанров \"{genres_path}\"")
 
     # загружаем историю обработанных архивов
     history = {}
-    history_path = os.path.join(program_dir, "history.json")
-    if not ignore_history:
-        if os.path.exists(history_path):
-            try:
-                with open(history_path, 'r', encoding='utf-8') as history_file:
-                    for line in history_file:
-                        if line.strip():
-                            history.update(json.loads(line))
-                logging.info(f"Обработанных ранее архивов: {len(history)}")
-            except Exception as e:
-                logging.error(f"Не удалось прочитать файл истории \"{history_path}\": {e}")
-                return
+    if os.path.exists(history_path):
+        try:
+            load_dictionary(history, history_path, True)
+            logging.info(f"Обработанных ранее архивов: {len(history)}")
+        except Exception as e:
+            logging.error(f"Не удалось прочитать файл истории \"{history_path}\": {e}")
+            return
 
     # загружаем словарь авторов
     authors = {}
     if os.path.exists(authors_path):
         try:
-            with open(authors_path, 'r', encoding='utf-8') as dictionary:
-                for line in dictionary:
-                    if line.strip():
-                        authors.update(json.loads(line.lower()))
+            load_dictionary(authors, authors_path, True)
             logging.info(f"Имеющихся авторов: {len(authors)}")
         except Exception as e:
             logging.error(f"Не удалось прочитать словарь авторов \"{authors_path}\": {e}")
             return
 
     # загружаем каталог книг
-    book_uids = set()
+    books = {}
     book_file_names = set()
     if os.path.exists(catalog_path):
         try:
@@ -421,22 +441,21 @@ def main():
                     data = json.loads(line)
                     for file_name in data:
                         if file_name:
-                            book_uids.add(get_book_uid(file_name, format_ext))
+                            books[get_book(file_name, format_ext)] = data[file_name][0]
                             book_file_names.add(file_name.lower())
-            logging.info(f"Имеющихся книг: {len(book_uids)} ({len(book_file_names)} файлов)")
+            logging.info(f"Имеющихся книг: {len(books)} ({len(book_file_names)} файлов)")
         except Exception as e:
             logging.error(f"Не удалось прочитать каталог книг \"{catalog_path}\": {e}")
             return
 
     # исключения
-    exclusions_file_path = os.path.join(program_dir, "exclusions.txt")
-    if os.path.exists(exclusions_file_path):
+    if os.path.exists(exclusions_path):
         try:
-            with open(exclusions_file_path, 'r') as exclusions_file:
+            with open(exclusions_path, 'r') as exclusions_file:
                 exclusions = {line.strip() for line in exclusions_file if line.strip()}
             logging.info(f"Исключенных книг: {len(exclusions)}")
         except Exception as e:
-            logging.error(f"Не удалось прочитать файл исключений \"{exclusions_file_path}\": {e}")
+            logging.error(f"Не удалось прочитать файл исключений \"{exclusions_path}\": {e}")
             return
 
     # получение перечня архивов
@@ -453,17 +472,17 @@ def main():
 
     # очистка
     if zip_list and delete_before and os.path.exists(catalog_path):
-        obsolete_uids = book_uids.copy()
+        obsolete_books.update(books)
         logging.info(f"Сравнение содержимого \"{catalog_path}\" и \"{archive_dir}\"...")
 
         # получение остатка книг, которых нет в источнике
         for zip_file_path in zip_list:
             with zipfile.ZipFile(zip_file_path, 'r') as zip:
                 for file_name in (name for name in zip.namelist() if name.lower().endswith((format_ext, archive_ext))):
-                    obsolete_uids.discard(get_book_uid(file_name, format_ext))
+                    obsolete_books.discard(get_book(file_name, format_ext))
 
-        if obsolete_uids:
-            logging.info(f"Обнаружено {len(obsolete_uids)} книг, отсутствующих в \"{archive_dir}\"")
+        if obsolete_books:
+            logging.info(f"Обнаружено {len(obsolete_books)} книг, отсутствующих в \"{archive_dir}\"")
 
             yn = "[y/N]: "
             answer = "y"
@@ -478,7 +497,7 @@ def main():
             if answer == "y" and delete_before in ("rename", "purge"):
                 rotate_file(catalog_path, backup_ext)
                 backup_catalog_path = catalog_path + backup_ext
-                logging.info(f"Создана резервная копия (\"*{backup_ext}\") файла {catalog_path}")
+                logging.info(f"Создана резервная копия каталога: {backup_catalog_path}")
 
                 obsolete_book_file_count = 0
                 obsolete_metadata_file_count = 0
@@ -487,59 +506,59 @@ def main():
                         for line in catalog:
                             data = json.loads(line)
                             for file_name in data:
-                                uid = get_book_uid(file_name, format_ext)
-                                if uid in obsolete_uids:
+                                book = get_book(file_name, format_ext)
+                                if book in obsolete_books:
                                     try:
                                         subdir = data[file_name][0]
 
                                         # книги
                                         file_kind = "файл книги"
-                                        book_file_path = os.path.join(work_dir, settings["books_subdir"], subdir, file_name)
-                                        if os.path.exists(book_file_path):
+                                        book_path = os.path.join(work_dir, settings["books_subdir"], subdir, file_name)
+                                        if os.path.exists(book_path):
                                             match delete_before:
                                                 case "rename":
-                                                    rotate_file(book_file_path, backup_ext)
-                                                    logging.info(f"Переименован {file_kind}: \"{book_file_path}\" -> \"{os.path.basename(book_file_path) + backup_ext}\"")
+                                                    rotate_file(book_path, backup_ext)
+                                                    logging.info(f"Переименован {file_kind}: \"{book_path}\" -> \"{os.path.basename(book_path) + backup_ext}\"")
                                                 case "purge":
-                                                    os.remove(book_file_path)
-                                                    logging.info(f"Удален {file_kind}: \"{book_file_path}\"")
+                                                    os.remove(book_path)
+                                                    logging.info(f"Удален {file_kind}: \"{book_path}\"")
                                         obsolete_book_file_count += 1
 
                                         # метаданные
                                         file_kind = "файл метаданных"
-                                        if file_name.endswith((format_ext + ".gz", format_ext + ".bz2", format_ext +".xz")):
+                                        if file_name.endswith((format_ext + ".gz", format_ext + ".bz2", format_ext + ".xz")):
                                             ext_count = 2
                                         else:
                                             ext_count = 1
-                                        metadata_file_path = os.path.join(work_dir, settings["metadata_subdir"], subdir, replace_ext(file_name, ".json", ext_count))
-                                        if os.path.exists(metadata_file_path):
+                                        metadata_path = os.path.join(work_dir, settings["metadata_subdir"], subdir, replace_ext(file_name, ".json", ext_count))
+                                        if os.path.exists(metadata_path):
                                             match delete_before:
                                                 case "rename":
-                                                    rotate_file(metadata_file_path, backup_ext)
-                                                    logging.info(f"Переименован {file_kind}: \"{metadata_file_path}\" -> \"{os.path.basename(metadata_file_path) + backup_ext}\"")
+                                                    rotate_file(metadata_path, backup_ext)
+                                                    logging.info(f"Переименован {file_kind}: \"{metadata_path}\" -> \"{os.path.basename(metadata_path) + backup_ext}\"")
                                                 case "purge":
-                                                    os.remove(metadata_file_path)
-                                                    logging.info(f"Удален {file_kind}: \"{book_file_path}\"")
+                                                    os.remove(metadata_path)
+                                                    logging.info(f"Удален {file_kind}: \"{book_path}\"")
                                         obsolete_metadata_file_count += 1
 
-                                        book_uids.discard(uid)
+                                        del books[book]
                                         book_file_names.discard(file_name)
                                     except Exception as e:
                                         with open(catalog_path, 'a', encoding='utf-8') as catalog:
                                             catalog.write(line)
-                                        logging.error(f"Не удалось выполнить очистку для uid=\"{uid}\": {e}")
+                                        logging.error(f"Не удалось выполнить удаление книги \"{book}\": {e}")
                                 else:
                                     with open(catalog_path, 'a', encoding='utf-8') as catalog:
                                         catalog.write(line)
 
                     logging.info(f"Очищено файлов книг: {obsolete_book_file_count})")
                     logging.info(f"Очищено файлов метаданных: {obsolete_metadata_file_count})")
-                    logging.info(f"Осталось книг: {len(book_uids)} ({len(book_file_names)} файлов)")
+                    logging.info(f"Осталось книг: {len(books)} ({len(book_file_names)} файлов)")
                 except Exception as e:
                     logging.error(f"Не удалось прочитать каталог книг \"{catalog_path}\": {e}")
                     return
             else:
-                logging.info(f"Введено {answer}, удаление не будет выполнено")
+                logging.info(f"Введено \"{answer}\", удаление не будет выполнено")
         else:
             logging.info(f"Отсутствующих книг в \"{archive_dir}\" не обнаружено")
 
@@ -562,23 +581,25 @@ def main():
         else:
             logging.info(f"Пустых папок в \"{work_dir}\" не найдено")
 
-    all_file_count = 0
-    all_new_file_count = 0
-
     used_langs = collections.Counter()
     skipped_langs = collections.Counter()
     no_langs = 0
 
+    archive_count = 0
+    all_file_count = 0
+    all_new_file_count = 0
+
     # перебор найденных архивов
     for zip_file_path in zip_list:
+        archive_count += 1
         zip_file_name = os.path.basename(zip_file_path)
 
         stats = os.stat(zip_file_path)
-        key = f"{zip_file_name}:{stats.st_size}:{int(stats.st_mtime)}"
+        key = file_key(zip_file_name, stats.st_size, stats.st_mtime)
 
         # обработанные ранее архивы пропускаем
         if key in history and not ignore_history:
-            logging.info(f"\"{zip_file_name}\" уже был обработан ранее")
+            logging.info(f"Архив \"{zip_file_name}\" уже был обработан {format_iso_date_string(history[key])}")
             continue
 
         logging.info(f">>> Обработка архива \"{zip_file_name}\"...")
@@ -598,11 +619,13 @@ def main():
                     if not file_name.lower().endswith((format_ext, archive_ext)):
                         continue
 
+                    file_count += 1
+
                     current_zip = zip
                     current_file_name = file_name
 
-                    nested = False
-                    nested_key = None
+                    nested_key = ""
+                    nested_zip = None
                     buffer = None
 
                     # если это вложенный архив с одним файлом
@@ -610,211 +633,222 @@ def main():
                         nested_zip_file_name = os.path.basename(file_name)
 
                         info = zip.getinfo(file_name)
-                        nested_key = f"{nested_zip_file_name}:{info.file_size}:{int(time.mktime(info.date_time + (0, 0, -1)))}"
+                        nested_key = file_key(nested_zip_file_name, info.file_size, time.mktime(info.date_time + (0, 0, -1)))
 
                         if nested_key in history and not ignore_history:
-                            logging.info(f"\"{nested_zip_file_name}\" уже был обработан ранее")
+                            logging.info(f"Вложенный архив \"{nested_zip_file_name}\" уже был обработан {format_iso_date_string(history[key])}")
                             continue                        
 
                         buffer = io.BytesIO(zip.read(file_name))
                         try:
+                            # чтение вложенного архива
                             nested_zip = zipfile.ZipFile(buffer)
                             nested_file_list = nested_zip.namelist()
-                            # в нем единственный файл с нужным расширением
-                            if len(nested_file_list) == 1:
+                            nested_file_count = len(nested_file_list)
+                            if nested_file_count > 0:
                                 nested_file_name = nested_file_list[0]
-                                # если имя архива равно имени вложенного файла, и это файл нужного формата
-                                if nested_file_name.endswith(format_ext) and os.path.splitext(os.path.basename(nested_file_name))[0].lower() == os.path.splitext(os.path.basename(file_name))[0].lower():
-                                    nested = True
-                                    single_file_archive = True
-                                    current_zip = nested_zip
-                                    current_file_name = nested_file_name
-                                else:
-                                    nested_zip.close()
-                                    buffer = None
                             else:
-                                nested_zip.close()
-                                buffer = None
+                                nested_file_name = None
                         except Exception as e:
                             logging.error(f"Не удалось прочитать вложенный архив \"{file_name}\": {e}")
+                            buffer.close()
+                            continue
+
+                        if (
+                            # если в нем единственный файл с нужным расширением
+                            nested_file_count == 1
+                            # и это файл с нужным расширением
+                            and nested_file_name.endswith(format_ext)
+                            # и имя архива равно имени вложенного файла
+                            and os.path.splitext(os.path.basename(nested_file_name))[0].lower() == os.path.splitext(os.path.basename(file_name))[0].lower()
+                        ):
+                            current_zip = nested_zip
+                            current_file_name = nested_file_name
+                            single_file_archive = True
+                        else:
+                            nested_zip.close()
+                            buffer.close()
+                            continue
 
                     try:
-                        file_count += 1
                         file_state = "новый файл"
 
                         # uid книги
-                        book_uid = get_book_uid(current_file_name, format_ext)
+                        book = get_book(current_file_name, format_ext)
 
                         # определяем, надо ли в этот раз обрабатывать файл
-                        skip = False
-                        if book_uid in exclusions:
-                            file_state = "исключен"
-                            skip = True
-                        if book_uid in book_uids and skip_existing:
-                            file_state = "обработан ранее"
-                            skip = True
+                        if book in exclusions:
+                            logging.info(f"{file_count}: \"{current_file_name}\" (исключен")
+                            continue
+                        if book in books and skip_existing:
+                            logging.info(f"{file_count}: \"{current_file_name}\" (обработан ранее")
+                            continue
 
-                        # если надо, обрабатываем
-                        if not skip:
-                            # попытка определить данные о книге
-                            encoding, lang, author, title, genre, version, date, annotation = get_book_info(current_zip, current_file_name)
+                        # попытка определить данные о книге
+                        encoding, lang, author, title, genre, version, date, annotation = get_book_info(current_zip, current_file_name)
 
-                            # нормализация языка
-                            if lang:
-                                lang = lang.lower()
+                        author_uid = "0"
+                        save_author = False
 
-                            # наименование жанра
+                        # если книга есть в каталоге, uid автора нужно брать у нее, чтобы не изменился
+                        if book in books:
+                            author_uid = books[book]
+
+                            # если автора нет в базе, надо добавить
+                            if author and author.lower() not in authors:
+                                if author_uid:
+                                    append_dictionary(authors, author, author_uid, authors_path)
+                                else:
+                                    logging.error(f"Не удалось получить UID автора для книги \"{book}\"")
+                                    return
+                        # определяем uid автора
+                        elif author:
+                            # если новый автор
+                            if author.lower() not in authors:
+                                # вычислить новый uid
+                                match author_ident:
+                                    case "guid":
+                                        author_uid = uuid.uuid4().hex
+                                    case "hash":
+                                        author_uid = hashlib.md5(author.lower().encode('utf-8')).hexdigest()
+
+                                # добавить в базу
+                                if author_uid:
+                                    append_dictionary(authors, author, author_uid, authors_path)
+                                else:
+                                    logging.error(f"Не удалось вычислить UID для автора \"{author}\"")
+                                    return
+                            else:
+                                author_uid = authors[author.lower()]
+
+                        # наименование автора не должно быть пустым
+                        if not author:
+                            author = "Неизвестен"
+
+                        # нормализация языка
+                        if lang:
+                            lang = lang.lower()
+
+                        # наименование жанра
+                        if genre:
                             genre_title = genres.get(genre)
                             if genre_title:
                                 genre = genre_title
                             else:
                                 logging.warning(f"Неизвестный жанр: \"{genre}\"")
 
-                            # если автор определен
-                            if author:
-                                # если новый автор, добавить в базу
-                                if author.lower() not in authors:
-                                    match author_ident:
-                                        case "guid":
-                                            uid = uuid.uuid4().hex
-                                        case "hash":
-                                            uid = hashlib.md5(author.lower().encode('utf-8')).hexdigest()
-
-                                    if uid:
-                                        authors[author.lower()] = uid
-                                        if not test_mode:
-                                            with open(authors_path, 'a', encoding='utf-8') as dictionary:
-                                                dictionary.write(json.dumps({author: uid}, ensure_ascii=False) + "\n")
-                                    else:
-                                        logging.error(f"Не удалось вычислить UID для автора \"{author}\"")
-                                        return
-                                else:
-                                    uid = authors[author.lower()]
-                            else:
-                                uid = "0"
-                                author = "Неизвестен"
-
-                            # файл книги
-                            book_file_name = os.path.basename(current_file_name).lower()
-                            if compresstype in ("zip", "7z"):
-                                book_file_name = replace_ext(book_file_name, compresstype)
-                            elif compresstype:
-                                book_file_name = book_file_name + replace_ext("", compresstype)
-                            else:
-                                pass
-                            book_path = os.path.join(work_dir, settings["books_subdir"], uid)
-                            book_file_path = os.path.join(book_path, book_file_name)
-
-                            # файл метаданных
-                            metadata_file_name =  replace_ext(os.path.basename(current_file_name).lower(), ".json")
-                            metadata_path = os.path.join(work_dir, settings["metadata_subdir"], uid)
-                            metadata_file_path = os.path.join(metadata_path, metadata_file_name)
-
-                            if uid != "0" or store_unknown:
-                                if lang in langs or not lang or not langs:
-                                    if lang:
-                                        used_langs[lang] += 1
-                                    else:
-                                        no_langs += 1
-                                    # копирование/переупаковка файла
-                                    if not test_mode and not os.path.exists(book_file_path):
-                                        os.makedirs(book_path, exist_ok=True)
-
-                                        # если в архиве только один файл, и нужен zip, то вместо повторного сжатия - копируем как есть
-                                        if single_file_archive and compresstype == "zip" and not repack:
-                                            if not nested:
-                                                shutil.copyfile(zip_file_path, book_file_path)
-                                            else:
-                                                current_zip.fp.seek(0)
-                                                with open(book_file_path, "wb") as book_file:
-                                                    book_file.write(buffer.getbuffer())
-                                            file_state = "готовый ZIP"
-                                        else:
-                                            with current_zip.open(current_file_name) as archived_data:
-                                                data = archived_data.read()
-                                                match compresstype:
-                                                    case "":
-                                                        with open(book_file_path, 'wb') as target:
-                                                            target.write(data)
-                                                    case "zip":
-                                                        with zipfile.ZipFile(book_file_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as target:
-                                                            target.writestr(os.path.basename(current_file_name), data)
-                                                    case "gzip":
-                                                        with gzip.open(book_file_path, 'wb', compresslevel=compresslevel) as target:
-                                                            target.write(data)
-                                                    case "bzip2":
-                                                        with bz2.open(book_file_path, 'wb', compresslevel=compresslevel) as target:
-                                                            target.write(data)
-                                                    case "lzma":
-                                                        with lzma.open(book_file_path, 'wb', preset=compresslevel) as target:
-                                                            target.write(data)
-                                                    case "7z":
-                                                        with py7zr.SevenZipFile(book_file_path, 'w') as target:
-                                                            target.writestr(data, os.path.basename(current_file_name))
-
-                                        new_file_count += 1
-                                    else:
-                                        file_state = "уже есть"
-
-                                    # сохраняем данные о книге
-                                    if store_metadata and not os.path.exists(metadata_file_path):
-                                        os.makedirs(metadata_path, exist_ok=True)
-                                        if not os.path.exists(metadata_file_path):
-                                            with open(metadata_file_path, 'w', encoding='utf-8') as metadata_file:
-                                                json.dump(
-                                                    {
-                                                        "encoding": encoding,
-                                                        "lang": lang,
-                                                        "author": author,
-                                                        "title": title,
-                                                        "genre": genre,
-                                                        "version": version,
-                                                        "date": date,
-                                                        "annotation": annotation
-                                                    },
-                                                    metadata_file,
-                                                    ensure_ascii=False,
-                                                    indent=0
-                                                )
-
-                                    # добавляем книгу в каталог
-                                    if book_file_name not in book_file_names and os.path.exists(book_file_path):
-                                        book_file_names.add(book_file_name)
-                                        with open(catalog_path, 'a', encoding='utf-8') as catalog:
-                                            catalog.write(
-                                                json.dumps(
-                                                    {book_file_name: [uid, create_index(author, title), os.path.getsize(book_file_path)]},
-                                                    ensure_ascii=False
-                                                )
-                                                +
-                                                "\n"
-                                            )
-                                    book_uids.add(book_uid)
-                                else:
-                                    if lang:
-                                        skipped_langs[lang] += 1
-                                    file_state = "пропущен: язык не из списка"
-                            else:
-                                file_state = "пропущен: не указан автор"
-
-                            logging.info(f"{file_count}: <{lang or 'N/A'}> {uid} [{author}] <- \"{book_file_name}\" ({file_state}) <- \"{file_name}\"")
+                        # файл книги
+                        book_file_name = os.path.basename(current_file_name).lower()
+                        if compresstype in ("zip", "7z"):
+                            book_file_name = replace_ext(book_file_name, compresstype)
+                        elif compresstype:
+                            book_file_name = book_file_name + replace_ext("", compresstype)
                         else:
-                            logging.info(f"{file_count}: \"{current_file_name}\" ({file_state})")
+                            pass
+                        book_path = os.path.join(work_dir, settings["books_subdir"], author_uid, book_file_name)
 
-                        history[nested_key] = datetime.datetime.now().isoformat()
-                        if save_history:
-                            with open(history_path, 'a', encoding='utf-8') as history_file:
-                                history_file.write(json.dumps({nested_key: history[nested_key]}, ensure_ascii=False) + '\n')
+                        # файл метаданных
+                        metadata_file_name =  replace_ext(os.path.basename(current_file_name).lower(), ".json")
+                        metadata_path = os.path.join(work_dir, settings["metadata_subdir"], author_uid, metadata_file_name)
+
+                        if author_uid != "0" or store_unknown:
+                            if lang in langs or not lang or not langs:
+                                if lang:
+                                    used_langs[lang] += 1
+                                else:
+                                    no_langs += 1
+                                # копирование/переупаковка файла
+                                if not test_mode and not os.path.exists(book_path):
+                                    new_file_count += 1
+                                    os.makedirs(os.path.dirname(book_path), exist_ok=True)
+
+                                    # если в архиве только один файл, и нужен zip, то вместо повторного сжатия - копируем как есть
+                                    if single_file_archive and compresstype == "zip" and not repack:
+                                        if not nested_zip:
+                                            shutil.copyfile(zip_file_path, book_path)
+                                        else:
+                                            buffer.seek(0)
+                                            with open(book_path, "wb") as book_file:
+                                                book_file.write(buffer.getbuffer())
+                                        file_state = "готовый ZIP"
+                                    else:
+                                        with current_zip.open(current_file_name) as archived_data:
+                                            data = archived_data.read()
+                                            match compresstype:
+                                                case "":
+                                                    with open(book_path, 'wb') as target:
+                                                        target.write(data)
+                                                case "zip":
+                                                    with zipfile.ZipFile(book_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as target:
+                                                        target.writestr(os.path.basename(current_file_name), data)
+                                                case "gzip":
+                                                    with gzip.open(book_path, 'wb', compresslevel=compresslevel) as target:
+                                                        target.write(data)
+                                                case "bzip2":
+                                                    with bz2.open(book_path, 'wb', compresslevel=compresslevel) as target:
+                                                        target.write(data)
+                                                case "lzma":
+                                                    with lzma.open(book_path, 'wb', preset=compresslevel) as target:
+                                                        target.write(data)
+                                                case "7z":
+                                                    with py7zr.SevenZipFile(book_path, 'w') as target:
+                                                        target.writestr(data, os.path.basename(current_file_name))
+                                else:
+                                    file_state = "уже есть"
+
+                                # сохраняем данные о книге
+                                if not test_mode and store_metadata and not os.path.exists(metadata_path):
+                                    os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+                                    with open(metadata_path, 'w', encoding='utf-8') as metadata_file:
+                                        json.dump(
+                                            {
+                                                "encoding": encoding,
+                                                "lang": lang,
+                                                "author": author,
+                                                "title": title,
+                                                "genre": genre,
+                                                "version": version,
+                                                "date": date,
+                                                "annotation": annotation
+                                            },
+                                            metadata_file,
+                                            ensure_ascii=False,
+                                            indent=0
+                                        )
+
+                                # добавляем книгу в каталог
+                                if book_file_name not in book_file_names and os.path.exists(book_path):
+                                    book_file_names.add(book_file_name)
+                                    with open(catalog_path, 'a', encoding='utf-8') as catalog:
+                                        catalog.write(
+                                            json.dumps(
+                                                {book_file_name: [author_uid, create_index(author, title), os.path.getsize(book_path)]},
+                                                ensure_ascii=False
+                                            )
+                                            +
+                                            "\n"
+                                        )
+                                books[book] = author_uid
+                            else:
+                                if lang:
+                                    skipped_langs[lang] += 1
+                                file_state = "пропущен: язык не из списка"
+                        else:
+                            file_state = "пропущен: не указан автор"
+
+                        logging.info(f"{file_count}: <{lang or 'N/A'}> {author_uid} [{author}] <- \"{book_file_name}\" ({file_state}) <- \"{file_name}\"")
                     finally:
-                        if nested:
-                            current_zip.close()
-                            buffer = None
+                        if nested_zip:
+                            nested_zip.close()
+                        if buffer:
+                            buffer.close()
+
+                    if save_history:
+                        append_dictionary(history, nested_key, datetime.datetime.now().isoformat(), history_path)
 
             # сохраняем состояние после каждого успешного архива
-            history[key] = datetime.datetime.now().isoformat()
             if save_history:
-                with open(history_path, 'a', encoding='utf-8') as history_file:
-                    history_file.write(json.dumps({key: history[key]}, ensure_ascii=False) + '\n')
+                append_dictionary(history, key, datetime.datetime.now().isoformat(), history_path)
 
             logging.info(f"Готово (всего файлов: {file_count}, из них новых: {new_file_count})")
 
@@ -823,7 +857,7 @@ def main():
         except Exception as e:
             logging.error(f"Не удалось обработать архив: {e}")
 
-    logging.info(f"Обработано архивов: {len(history)} (всего файлов: {all_file_count}, из них новых: {all_new_file_count})")
+    logging.info(f"Обработано архивов: {archive_count} (всего файлов: {all_file_count}, из них новых: {all_new_file_count})")
 
     if used_langs:
         langs_found = ", ".join([f"{lang} ({used_langs[lang]})" for lang in sorted(used_langs)])
