@@ -322,7 +322,7 @@ def main():
                 settings = json.load(settings_file)
             logging.info(f"Получены настройки из файла \"{settings_file_path}\"")
         except Exception as e:
-            logging.error(f"Не удалось прочитать файл \"{settings_file_path}\": {e}")
+            logging.exception(f"Не удалось прочитать файл \"{settings_file_path}\": {e}")
             return
     else:
         logging.warning(f"Отсутствует файл настроек \"{settings_file_path}\", будут использованы значения по-умолчанию")
@@ -360,7 +360,7 @@ def main():
                 langs_filter = ", ".join(sorted(langs))
                 logging.info(f"Фильтр по языкам: {langs_filter}")
         except Exception as e:
-            logging.error(f"Не удалось установить фильтр по языкам: {e}")
+            logging.exception(f"Не удалось установить фильтр по языкам: {e}")
             return
 
     # сжатие
@@ -374,7 +374,7 @@ def main():
         try:
             compresslevel = int(compress[1].strip()) if len(compress) > 1 else 5
         except Exception as e:
-            logging.error(f"Не удалось установить степень сжатия: {e}")
+            logging.exception(f"Не удалось установить степень сжатия: {e}")
             return
     elif compresstype in ("7zip", "7z"):
         try:
@@ -406,7 +406,7 @@ def main():
             load_dictionary(genres, genres_path)
             logging.info(f"Загружены жанры из файла \"{genres_path}\"")
         except Exception as e:
-            logging.error(f"Не удалось прочитать файл жанров \"{genres_path}\": {e}")
+            logging.exception(f"Не удалось прочитать файл жанров \"{genres_path}\": {e}")
             return
     else:
         logging.warning(f"Отсутствует файл жанров \"{genres_path}\"")
@@ -418,7 +418,7 @@ def main():
             load_dictionary(history, history_path, True)
             logging.info(f"Обработанных ранее архивов: {len(history)}")
         except Exception as e:
-            logging.error(f"Не удалось прочитать файл истории \"{history_path}\": {e}")
+            logging.exception(f"Не удалось прочитать файл истории \"{history_path}\": {e}")
             return
 
     # загружаем словарь авторов
@@ -428,7 +428,7 @@ def main():
             load_dictionary(authors, authors_path, True)
             logging.info(f"Имеющихся авторов: {len(authors)}")
         except Exception as e:
-            logging.error(f"Не удалось прочитать словарь авторов \"{authors_path}\": {e}")
+            logging.exception(f"Не удалось прочитать словарь авторов \"{authors_path}\": {e}")
             return
 
     # загружаем каталог книг
@@ -455,7 +455,7 @@ def main():
                 exclusions = {line.strip() for line in exclusions_file if line.strip()}
             logging.info(f"Исключенных книг: {len(exclusions)}")
         except Exception as e:
-            logging.error(f"Не удалось прочитать файл исключений \"{exclusions_path}\": {e}")
+            logging.exception(f"Не удалось прочитать файл исключений \"{exclusions_path}\": {e}")
             return
 
     # получение перечня архивов
@@ -555,7 +555,7 @@ def main():
                     logging.info(f"Очищено файлов метаданных: {obsolete_metadata_file_count})")
                     logging.info(f"Осталось книг: {len(books)} ({len(book_file_names)} файлов)")
                 except Exception as e:
-                    logging.error(f"Не удалось прочитать каталог книг \"{catalog_path}\": {e}")
+                    logging.exception(f"Не удалось прочитать каталог книг \"{catalog_path}\": {e}")
                     return
             else:
                 logging.info(f"Введено \"{answer}\", удаление не будет выполнено")
@@ -575,7 +575,7 @@ def main():
                         empty_dir_count += 1
                         logging.info(f"Удалена пустая папка: \"{dir_path}\"")
                     except Exception as e:
-                        logging.warning(f"Ошибка при удалении пустой папки \"{dir_path}\": {e}")
+                        logging.exception(f"Ошибка при удалении пустой папки \"{dir_path}\": {e}")
         if empty_dir_count:
             logging.info(f"Всего удалено пустых папок в \"{work_dir}\": {empty_dir_count}")
         else:
@@ -636,7 +636,7 @@ def main():
                         nested_key = file_key(nested_zip_file_name, info.file_size, time.mktime(info.date_time + (0, 0, -1)))
 
                         if nested_key in history and not ignore_history:
-                            logging.info(f"Вложенный архив \"{nested_zip_file_name}\" уже был обработан {format_iso_date_string(history[key])}")
+                            logging.info(f"Вложенный архив \"{nested_zip_file_name}\" уже был обработан {format_iso_date_string(history[nested_key])}")
                             continue                        
 
                         buffer = io.BytesIO(zip.read(file_name))
@@ -650,7 +650,7 @@ def main():
                             else:
                                 nested_file_name = None
                         except Exception as e:
-                            logging.error(f"Не удалось прочитать вложенный архив \"{file_name}\": {e}")
+                            logging.exception(f"Не удалось прочитать вложенный архив \"{file_name}\": {e}")
                             buffer.close()
                             continue
 
@@ -855,7 +855,7 @@ def main():
             all_file_count += file_count
             all_new_file_count += new_file_count
         except Exception as e:
-            logging.error(f"Не удалось обработать архив: {e}")
+            logging.exception(f"Не удалось обработать архив: {e}")
 
     logging.info(f"Обработано архивов: {archive_count} (всего файлов: {all_file_count}, из них новых: {all_new_file_count})")
 
@@ -873,13 +873,14 @@ def main():
         shutil.copyfile(os.path.join(program_dir, "index.html"), index_path)
         logging.info(f"Скопирован файл: \"{index_path}\"...")
     except Exception as e:
-        logging.warning(f"Не удалось скопировать \"index.html\": {e}")
+        logging.exception(f"Не удалось скопировать \"index.html\": {e}")
+
     # web-иконка
     try:
         shutil.copyfile(os.path.join(program_dir, "favicon.svg"), favicon_path)
         logging.info(f"Скопирован файл: \"{favicon_path}\"...")
     except Exception as e:
-        logging.warning(f"Не удалось скопировать \"favicon.svg\": {e}")
+        logging.exception(f"Не удалось скопировать \"favicon.svg\": {e}")
 
     # сжатие файлов для web
     if use_gzip:
