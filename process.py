@@ -6,6 +6,7 @@ import datetime
 import zipfile
 import hashlib
 import json
+import codecs
 import uuid
 import logging
 import os
@@ -87,6 +88,7 @@ def set_logger(log):
 
 def format_bytes(size):
     prefix = "-" if size < 0 else ""
+    measure = "байт"
 
     size = abs(float(size))
     
@@ -98,9 +100,9 @@ def format_bytes(size):
             size /= 1024
             unit_index += 1
 
-        return f"{prefix}{size:.2f} {units[unit_index]}байт"
+        return f"{prefix}{size:.2f} {units[unit_index]}{measure}"
     else:
-        return f"{prefix}{size} байт"
+        return f"{prefix}{size} {measure}"
 
 def replace_ext(file_name, ext, count=1):
     if not ext.startswith("."):
@@ -111,22 +113,27 @@ def replace_ext(file_name, ext, count=1):
     return os.path.splitext(file_name)[0] + ext
 
 def smart_truncate(text, max_len=4096):
+    end = "..."
+    
     if len(text) <= max_len:
         return text
 
-    limit = max_len - 3
+    limit = max_len - len(end)
     truncated = text[:limit]
-    last_space = truncated.rfind(' ')
+    last_space = truncated.rfind(" ")
     if last_space != -1:
         truncated = truncated[:last_space]
-    return truncated.rstrip('.,!?; ') + '...'
+    return truncated.rstrip(".,!?; ") + end
 
 def file_key(file_name, size, timestamp):
     return f"{file_name}:{size}:{int(timestamp)}"
 
 def create_index(author, title):
-    # слова автора для фильтрации (в нижнем регистре)
-    author_words = set(re.findall(r'\w+', author.lower()))
+    # автор входит в индекс
+    index = author
+
+    # слова автора для фильтрации названия
+    author_words = set(re.findall(r"\w+", author.lower()))
 
     # разбивка названия по пробелам
     title_words_orig = title.split()
@@ -134,13 +141,16 @@ def create_index(author, title):
     filtered_title = []
     for word in title_words_orig:
         # очищаем слово от знаков препинания для проверки
-        clean_word = re.sub(r'[^\w]', '', word).lower()
+        clean_word = re.sub(r"[^\w]", "", word).lower()
 
         if clean_word not in author_words and clean_word != "":
             filtered_title.append(word)
 
     # cклеиваем автора и очищенный заголовок
-    return f"{author} {' '.join(filtered_title)}"
+    if filtered_title:
+        index = index + " " + " ".join(filtered_title)
+
+    return index
 
 def get_book(file_name, format_ext):
     file_name = os.path.basename(file_name).lower()
@@ -166,76 +176,78 @@ def get_book_info(zip, file_name):
             # читаем начало файла
             data = book_file.read(16384)
 
-            # определяем кодировку
-            encoding_match = re.search(rb'encoding=["\'](.*?)["\']', data)
-            if encoding_match:
-                encoding = encoding_match.group(1).decode('ascii')
+        # декодирование
+        encoding_match = re.search(rb"encoding\s*=\s*[\"\'](.*?)[\"\']", data, re.IGNORECASE)
+        if encoding_match:
+            encoding = encoding_match.group(1).decode("ascii", errors="replace").strip()
 
-            if encoding:
-                text = data.decode(encoding, errors='ignore')
-            else:
-                text = data.decode('utf-8', errors='ignore')
+        if encoding:
+            codec = codecs.lookup(encoding).name
+        else:
+            codec = "utf-8"
 
-            # ищем блок <lang>
-            lang_match = re.search(r'<lang>(.*?)</lang>', text, search_flags)
-            if lang_match:
-                lang = html.unescape(re.sub(r'<.*?>', '', lang_match.group(1)).strip())
+        text = data.decode(codec, errors="replace")
 
-            # ищем блоки <author>
-            author_blocks = re.findall(r'<author>(.*?)</author>', text, search_flags)
-            for author_block in author_blocks:
-                # извлекаем имя, фамилию и отчество (опционально)
-                first_name = re.search(r'<first-name>(.*?)</first-name>', author_block, search_flags)
-                last_name = re.search(r'<last-name>(.*?)</last-name>', author_block, search_flags)
-                middle_name = re.search(r'<middle-name>(.*?)</middle-name>', author_block, search_flags)
+        # ищем блок <lang>
+        lang_match = re.search(r"<lang>(.*?)</lang>", text, search_flags)
+        if lang_match:
+            lang = html.unescape(re.sub(r"<.*?>", "", lang_match.group(1)).strip())
 
-                # очистка от тегов и лишних пробелов
-                name_parts = []
-                if first_name:
-                    name_parts.append(re.sub(r'<.*?>', '', first_name.group(1)).strip()[:256])
-                if middle_name:
-                    name_parts.append(re.sub(r'<.*?>', '', middle_name.group(1)).strip()[:256])
-                if last_name:
-                    name_parts.append(re.sub(r'<.*?>', '', last_name.group(1)).strip()[:256])
-                # фильтруем пустые части и объединяем
-                author = html.unescape(" ".join([p for p in name_parts if p]))
+        # ищем блоки <author>
+        author_blocks = re.findall(r"<author>(.*?)</author>", text, search_flags)
+        for author_block in author_blocks:
+            # извлекаем имя, фамилию и отчество (опционально)
+            first_name = re.search(r"<first-name>(.*?)</first-name>", author_block, search_flags)
+            last_name = re.search(r"<last-name>(.*?)</last-name>", author_block, search_flags)
+            middle_name = re.search(r"<middle-name>(.*?)</middle-name>", author_block, search_flags)
 
-                if author:
-                    break
+            # очистка от тегов и лишних пробелов
+            name_parts = []
+            if first_name:
+                name_parts.append(re.sub(r"<.*?>", "", first_name.group(1)).strip()[:256])
+            if middle_name:
+                name_parts.append(re.sub(r"<.*?>", "", middle_name.group(1)).strip()[:256])
+            if last_name:
+                name_parts.append(re.sub(r"<.*?>", "", last_name.group(1)).strip()[:256])
+            # фильтруем пустые части и объединяем
+            author = html.unescape(" ".join([p for p in name_parts if p]))
 
-            # ищем блок <book-title>
-            title_match = re.search(r'<book-title>(.*?)</book-title>', text, search_flags)
+            if author:
+                break
+
+        # ищем блок <book-title>
+        title_match = re.search(r"<book-title>(.*?)</book-title>", text, search_flags)
+        if title_match:
+            title = html.unescape(re.sub(r"<.*?>", "", title_match.group(1)).strip()[:256])
+            title = " ".join(title.split()) if title else ""
+
+        if not title:
+            # ищем блок <title>
+            title_match = re.search(r"<title>(.*?)</title>", text, search_flags)
             if title_match:
-                title = html.unescape(re.sub(r'<.*?>', '', title_match.group(1)).strip()[:256])
+                title = html.unescape(re.sub(r"<.*?>", "", title_match.group(1)).strip()[:256])
                 title = " ".join(title.split()) if title else ""
 
-            if not title:
-                # ищем блок <title>
-                title_match = re.search(r'<title>(.*?)</title>', text, search_flags)
-                if title_match:
-                    title = html.unescape(re.sub(r'<.*?>', '', title_match.group(1)).strip()[:256])
-                    title = " ".join(title.split()) if title else ""
+        # ищем блок <genre>
+        genre_match = re.search(r"<genre>(.*?)</genre>", text, search_flags)
+        if genre_match:
+            genre = html.unescape(re.sub(r"<.*?>", "", genre_match.group(1)).strip()[:128])
 
-            # ищем блок <genre>
-            genre_match = re.search(r'<genre>(.*?)</genre>', text, search_flags)
-            if genre_match:
-                genre = html.unescape(re.sub(r'<.*?>', '', genre_match.group(1)).strip()[:128])
+        # ищем блок <version>
+        version_match = re.search(r"<version>(.*?)</version>", text, search_flags)
+        if version_match:
+            version = html.unescape(re.sub(r"<.*?>", "", version_match.group(1)).strip()[:8])
 
-            # ищем блок <version>
-            version_match = re.search(r'<version>(.*?)</version>', text, search_flags)
-            if version_match:
-                version = html.unescape(re.sub(r'<.*?>', '', version_match.group(1)).strip()[:8])
+        # ищем блок <date>
+        date_match = re.search(r"<date>(.*?)</date>", text, search_flags)
+        if date_match:
+            date = html.unescape(re.sub(r"<.*?>", "", date_match.group(1)).strip()[:32])
 
-            # ищем блок <date>
-            date_match = re.search(r'<date>(.*?)</date>', text, search_flags)
-            if date_match:
-                date = html.unescape(re.sub(r'<.*?>', '', date_match.group(1)).strip()[:32])
-
-            # ищем блок <annotation>
-            annotation_match = re.search(r'<annotation>(.*?)</annotation>', text, search_flags)
-            if annotation_match:
-                annotation = html.unescape(re.sub(r'<.*?>', '', annotation_match.group(1)).strip()[:8192])
-                annotation = smart_truncate(" ".join(annotation.split())) if annotation else ""
+        # ищем блок <annotation>
+        annotation_match = re.search(r"<annotation>(.*?)</annotation>", text, search_flags)
+        if annotation_match:
+            annotation = html.unescape(re.sub(r"<.*?>", "", annotation_match.group(1)).strip()[:8192])
+            annotation = smart_truncate(" ".join(annotation.split())) if annotation else ""
     except:
         pass
 
