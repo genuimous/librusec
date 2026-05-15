@@ -1,7 +1,7 @@
 # Librusec
 Python script toolkit for sorting and parsing of librusec archives
 
-Tested on Windows with Python 3.8.10, requires 3.6+ (3.7+ recommended)
+Requires Python 3.10+
 
 ## Manual
 See [readme.txt](doc/readme.txt) for manual (russian only)
