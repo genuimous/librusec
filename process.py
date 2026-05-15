@@ -32,7 +32,9 @@ def load_dictionary(dictionary, file_name, streamable=False):
                         dictionary[key.lower()] = value
     else:
         with open(file_name, "r", encoding="utf-8") as dictionary_file:
-            dictionary = json.load(dictionary_file)
+            data = json.load(dictionary_file)
+            dictionary.clear()
+            dictionary.update({key.lower(): value for key, value in data.items()})
 
 def append_dictionary(dictionary, key, value, file_name=None):
     if not(key is None or key == ""):
@@ -416,7 +418,7 @@ def main():
     if os.path.exists(genres_path):
         try:
             load_dictionary(genres, genres_path)
-            logging.info(f"Загружены жанры из файла \"{genres_path}\"")
+            logging.info(f"Загружены жанры из файла \"{genres_path}\" ({len(genres)})")
         except Exception as e:
             logging.exception(f"Не удалось прочитать файл жанров \"{genres_path}\": {e}")
             return
@@ -743,7 +745,7 @@ def main():
 
                         # наименование жанра
                         if genre:
-                            genre_title = genres.get(genre)
+                            genre_title = genres.get(genre.lower())
                             if genre_title:
                                 genre = genre_title
                             else:
