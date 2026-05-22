@@ -289,7 +289,7 @@ def main():
     index_path = os.path.join(work_dir, "index.html")
     favicon_path = os.path.join(work_dir, "favicon.svg")
     log = args.log or os.path.join(program_dir, "process.log")
-    delete_before = args.delete_before
+    delete_before = args.delete_before.lower()
     clean_empty = args.clean_empty
     ignore_history = args.ignore_history
     skip_existing = args.skip_existing
@@ -319,7 +319,7 @@ def main():
                 logging.info(f"{parser_description:<32}: \"{parser_value}\"")
     logging.info("-"*terminal_width)
 
-    if delete_before and delete_before not in ("demo", "rename", "purge"):
+    if delete_before and delete_before not in ("rename", "purge"):
         logging.warning(f"Режим очистки \"{delete_before}\" не поддерживается")
         return
 
@@ -486,10 +486,10 @@ def main():
 
     # очистка
     if zip_list and delete_before and os.path.exists(catalog_path):
-        obsolete_books.update(books)
         logging.info(f"Сравнение содержимого \"{catalog_path}\" и \"{archive_dir}\"...")
 
         # получение остатка книг, которых нет в источнике
+        obsolete_books = set(books)
         for zip_file_path in zip_list:
             with zipfile.ZipFile(zip_file_path, 'r') as zip:
                 for file_name in (name for name in zip.namelist() if name.lower().endswith((format_ext, archive_ext))):
@@ -501,14 +501,12 @@ def main():
             yn = "[y/N]: "
             answer = "y"
             match delete_before:
-                case "demo":
-                    logging.info(f"В режиме delete-before={delete_before} удаление книг не производится")
                 case "rename":
                     answer = input(f"Файлы лишних книг будут переименованы в \"*.bak\", продолжить? {yn}").lower().strip()
                 case "purge":
                     answer = input(f"Файлы лишних книг будут удалены безвозвратно, продолжить? {yn}").lower().strip()
 
-            if answer == "y" and delete_before in ("rename", "purge"):
+            if answer == "y":
                 rotate_file(catalog_path, backup_ext)
                 backup_catalog_path = catalog_path + backup_ext
                 logging.info(f"Создана резервная копия каталога: {backup_catalog_path}")
@@ -552,7 +550,7 @@ def main():
                                                     logging.info(f"Переименован {file_kind}: \"{metadata_path}\" -> \"{os.path.basename(metadata_path) + backup_ext}\"")
                                                 case "purge":
                                                     os.remove(metadata_path)
-                                                    logging.info(f"Удален {file_kind}: \"{book_path}\"")
+                                                    logging.info(f"Удален {file_kind}: \"{metadata_path}\"")
                                         obsolete_metadata_file_count += 1
 
                                         del books[book]
@@ -565,8 +563,8 @@ def main():
                                     with open(catalog_path, 'a', encoding='utf-8') as catalog:
                                         catalog.write(line)
 
-                    logging.info(f"Очищено файлов книг: {obsolete_book_file_count})")
-                    logging.info(f"Очищено файлов метаданных: {obsolete_metadata_file_count})")
+                    logging.info(f"Очищено файлов книг: {obsolete_book_file_count}")
+                    logging.info(f"Очищено файлов метаданных: {obsolete_metadata_file_count}")
                     logging.info(f"Осталось книг: {len(books)} ({len(book_file_names)} файлов)")
                 except Exception as e:
                     logging.exception(f"Не удалось прочитать каталог книг \"{catalog_path}\": {e}")
@@ -692,10 +690,10 @@ def main():
 
                         # определяем, надо ли в этот раз обрабатывать файл
                         if book in exclusions:
-                            logging.info(f"{file_count}: \"{current_file_name}\" (исключен")
+                            logging.info(f"{file_count}: \"{current_file_name}\" (исключен)")
                             continue
                         if book in books and skip_existing:
-                            logging.info(f"{file_count}: \"{current_file_name}\" (обработан ранее")
+                            logging.info(f"{file_count}: \"{current_file_name}\" (обработан ранее)")
                             continue
 
                         # попытка определить данные о книге
