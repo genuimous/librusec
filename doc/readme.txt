@@ -92,7 +92,7 @@ https://nnmclub.to/forum/viewtopic.php?t=1689402
 process.py --archive-dir <каталог_с_архивами> --work-dir <каталог_приемник>
 
 Рекомендуемая командная строка:
-process.py -m -s --archive-dir <каталог_с_архивами> --work-dir <каталог_приемник> --log <файл_протокола>
+process.py -s -m -g -e --delete-before purge --archive-dir <каталог_с_архивами> --work-dir <каталог_приемник> --log <файл_протокола>
 
 Пример:
 process.py -m -s --archive-dir y:\lib.rus.ec --work-dir x:\Library --log y:\library.log
