@@ -873,10 +873,10 @@ def main():
 
     if used_langs:
         langs_found = ", ".join([f"{lang} ({used_langs[lang]})" for lang in sorted(used_langs)])
-        logging.info(f"Использовано языков: {langs_found}")
+        logging.info(f"Использованные языки: {langs_found}")
     if skipped_langs:
         langs_found = ", ".join([f"{lang} ({skipped_langs[lang]})" for lang in sorted(skipped_langs)])
-        logging.info(f"Пропущено языков: {langs_found}")
+        logging.info(f"Пропущенные языки: {skipped_langs}")
     if no_langs:
         logging.info(f"Без языка: {no_langs}")
 
