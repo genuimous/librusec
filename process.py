@@ -872,11 +872,11 @@ def main():
     logging.info(f"Обработано архивов: {archive_count} (всего файлов: {all_file_count}, из них новых: {all_new_file_count})")
 
     if used_langs:
-        langs_found = ", ".join([f"{lang} ({used_langs[lang]})" for lang in sorted(used_langs)])
-        logging.info(f"Использованные языки: {langs_found}")
+        used_langs_agg = ", ".join([f"{lang} ({used_langs[lang]})" for lang in sorted(used_langs)])
+        logging.info(f"Использованные языки: {used_langs_agg}")
     if skipped_langs:
-        langs_found = ", ".join([f"{lang} ({skipped_langs[lang]})" for lang in sorted(skipped_langs)])
-        logging.info(f"Пропущенные языки: {skipped_langs}")
+        skipped_langs_agg = ", ".join([f"{lang} ({skipped_langs[lang]})" for lang in sorted(skipped_langs)])
+        logging.info(f"Пропущенные языки: {skipped_langs_agg}")
     if no_langs:
         logging.info(f"Без языка: {no_langs}")
 
